@@ -121,6 +121,14 @@ http.createServer(async (req, res) => {
       await messaging.subscribeToTopic(token, topicOf(min));
       return send(200, { ok: true, topic: topicOf(min) });
     }
+    if (req.url === '/test') {
+      // 自分のトークン宛にだけ送る（トークンを知っている本人しか使えない）
+      await messaging.send({
+        token, data: { id: 'test-' + Date.now(), kind: 'test', title: 'テスト通知', body: '中継サーバー経由のプッシュ通知が届いています', tag: 'test', urgent: '0' },
+        webpush: { headers: { Urgency: 'high', TTL: '60' } }
+      });
+      return send(200, { ok: true });
+    }
     if (req.url === '/unsubscribe') {
       await Promise.all(THRESHOLDS.map(t => messaging.unsubscribeFromTopic(token, topicOf(t))));
       return send(200, { ok: true });
