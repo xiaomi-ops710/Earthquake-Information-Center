@@ -16,5 +16,5 @@ self.APP_CONFIG = {
   // Firebase コンソール > Cloud Messaging > ウェブプッシュ証明書 の鍵ペア（公開鍵）
   vapidKey: 'BIW7kFrqKYh7qmzR-7RM2rKgVhXmqDZMgRF9lcQ6Et6FrTDeIFUr5S0Zaim1WZKEhkV5wdRsTAE_jUqwLWSDBME',
   // relay/ サーバーの公開URL（例: https://quake-relay.example.com）
-  relayUrl: ''
+  relayUrl: 'https://earthquake-information-center.onrender.com'
 };
