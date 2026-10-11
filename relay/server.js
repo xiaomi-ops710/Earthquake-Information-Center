@@ -14,7 +14,8 @@ import WebSocket from 'ws';
 import admin from 'firebase-admin';
 
 const WS_URL = process.env.P2P_WS_URL || 'wss://api.p2pquake.net/v2/ws';
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+const toOrigin = (v) => { try { return new URL(v.trim()).origin; } catch { return v.trim().replace(/\/+$/, ''); } };
+const ALLOWED = (process.env.ALLOWED_ORIGIN || '*').split(',').map(s => s.trim()).filter(Boolean).map(s => (s === '*' ? s : toOrigin(s)));
 const PORT = Number(process.env.PORT || 8080);
 const THRESHOLDS = [10, 30, 40, 45, 55];              // 端末が選べる最小震度（P2P震度値）
 const topicOf = (t) => `quake-min-${t}`;
@@ -102,13 +103,21 @@ function connect() {
 connect();
 
 /* ---------- HTTP: トークン登録 ---------- */
-const cors = { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'content-type', 'Vary': 'Origin' };
+const corsFor = (req) => {
+  const o = req.headers.origin;
+  const allow = ALLOWED.includes('*') ? '*' : (ALLOWED.includes(o) ? o : ALLOWED[0]);
+  return { 'Access-Control-Allow-Origin': allow, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'content-type', 'Vary': 'Origin' };
+};
 const readJson = (req) => new Promise((res, rej) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > 4096) { rej(new Error('too large')); req.destroy(); } });
   req.on('end', () => { try { res(JSON.parse(s || '{}')); } catch (e) { rej(e); } });
 });
 http.createServer(async (req, res) => {
-  const send = (code, obj) => { res.writeHead(code, { ...cors, 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  const send = (code, obj) => {
+    res.writeHead(code, { ...corsFor(req), 'content-type': 'application/json' });
+    res.end(code === 204 ? undefined : JSON.stringify(obj));
+  };
+  if (req.method !== 'OPTIONS') console.log(`[http] ${req.method} ${req.url} origin=${req.headers.origin || '-'}`);
   if (req.method === 'OPTIONS') return send(204, {});
   if (req.url === '/healthz') return send(200, { ok: true });
   if (req.method !== 'POST') return send(404, { error: 'not found' });
