@@ -1,5 +1,5 @@
 /* Service Worker: オフラインキャッシュ + FCM バックグラウンド通知 */
-const VER = 'v1.0.0';
+const VER = 'v1.0.1';
 const SHELL = `shell-${VER}`, TILES = 'tiles-v1', LIBS = 'libs-v1';
 const SHELL_FILES = ['./', './index.html', './css/app.css', './js/app.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
@@ -68,7 +68,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.hostname.endsWith('p2pquake.net')) return;                 // API は常にネットワーク
-  if (url.hostname.endsWith('cartocdn.com')) return e.respondWith(tile(req));
+  if (url.hostname === 'cyberjapandata.gsi.go.jp') return e.respondWith(tile(req));
   if (url.hostname === 'unpkg.com') return e.respondWith(swr(req, LIBS));
   if (url.hostname.endsWith('googleapis.com') || url.hostname === 'fonts.gstatic.com') return e.respondWith(swr(req, LIBS));
   if (url.origin === location.origin) {
