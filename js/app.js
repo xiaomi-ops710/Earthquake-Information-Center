@@ -126,11 +126,12 @@ let map = null, layer = null; const markers = new Map();
 const JP_BOUNDS = [[24, 122], [46, 148]];
 function initMap() {
   if (!window.L) { $('#map').innerHTML = '<p class="empty">地図ライブラリを読み込めませんでした。オンラインで一度開くとオフラインでも表示されます。</p>'; return; }
-  map = L.map('map', { zoomControl: false, attributionControl: true, worldCopyJump: true, minZoom: 3, maxZoom: 12, preferCanvas: false });
+  map = L.map('map', { zoomControl: false, attributionControl: true, worldCopyJump: true, minZoom: 3, maxZoom: 16, preferCanvas: false });
   L.control.zoom({ position: 'bottomright' }).addTo(map);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd', maxZoom: 19, crossOrigin: true,
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/attributions">CARTO</a>'
+  // 国土地理院 淡色地図（無料・APIキー不要）。CSSフィルターでダーク化している
+  L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+    minZoom: 3, maxZoom: 18, maxNativeZoom: 18,
+    attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>'
   }).addTo(map);
   layer = L.layerGroup().addTo(map);
   map.fitBounds(JP_BOUNDS, { padding: [10, 10] });
@@ -443,8 +444,19 @@ function loadScript(src) {
 const FB_VER = '10.12.2';
 const pushConfigured = () => !!(CFG.firebase.apiKey && CFG.vapidKey && CFG.relayUrl);
 async function relay(path, body) {
-  const r = await fetch(CFG.relayUrl.replace(/\/$/, '') + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error('relay ' + r.status);
+  const url = CFG.relayUrl.replace(/\/$/, '') + path;
+  let lastErr;
+  for (let i = 0; i < 3; i++) {                 // 無料サーバーの起動待ち(コールドスタート)に備えて再試行
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error('中継サーバーがエラーを返しました (' + r.status + ')');
+      return r.json().catch(() => ({}));
+    } catch (e) {
+      lastErr = e instanceof TypeError ? new Error('中継サーバーに接続できません。数十秒待って再試行、またはALLOWED_ORIGINを確認してください') : e;
+      if (i < 2) await new Promise(res => setTimeout(res, 5000));
+    }
+  }
+  throw lastErr;
 }
 async function enablePush() {
   if (!pushConfigured()) throw new Error('config.js に Firebase / relay の設定が必要です');
@@ -499,6 +511,14 @@ function initSettingsUI() {
     try { e.target.checked ? await enablePush() : await disablePush(); toast(e.target.checked ? 'プッシュ通知を有効にしました' : 'プッシュ通知を無効にしました'); }
     catch (err) { e.target.checked = false; settings.push = false; saveSettings(); toast(err.message || 'プッシュ通知を有効にできません'); }
     sync();
+  };
+  $('#btnTest').onclick = async () => {
+    try {
+      if (!settings.push || !settings.pushToken) throw new Error('先にプッシュ通知(FCM)をオンにしてください');
+      toast('テスト通知を送信中…');
+      await relay('/test', { token: settings.pushToken });
+      toast('送信しました。数秒以内に通知が届きます');
+    } catch (err) { toast(err.message || '送信に失敗しました'); }
   };
   $('#minScale').onclick = async (e) => {
     const c = e.target.closest('.chip'); if (!c) return;
