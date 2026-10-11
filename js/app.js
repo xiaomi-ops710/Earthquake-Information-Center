@@ -446,14 +446,21 @@ const pushConfigured = () => !!(CFG.firebase.apiKey && CFG.vapidKey && CFG.relay
 async function relay(path, body) {
   const url = CFG.relayUrl.replace(/\/$/, '') + path;
   let lastErr;
-  for (let i = 0; i < 3; i++) {                 // 無料サーバーの起動待ち(コールドスタート)に備えて再試行
+  for (let i = 0; i < 2; i++) {                 // 無料サーバーの起動待ち(コールドスタート)に備えて再試行
     try {
       const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       if (!r.ok) throw new Error('中継サーバーがエラーを返しました (' + r.status + ')');
       return r.json().catch(() => ({}));
     } catch (e) {
-      lastErr = e instanceof TypeError ? new Error('中継サーバーに接続できません。数十秒待って再試行、またはALLOWED_ORIGINを確認してください') : e;
-      if (i < 2) await new Promise(res => setTimeout(res, 5000));
+      if (!(e instanceof TypeError)) throw e;
+      // 原因切り分け: no-cors で到達できるなら CORS(ALLOWED_ORIGIN) の問題
+      let reachable = false;
+      try { await fetch(CFG.relayUrl.replace(/\/$/, '') + '/healthz', { mode: 'no-cors', cache: 'no-store' }); reachable = true; } catch { /* unreachable */ }
+      lastErr = new Error(reachable
+        ? '中継サーバーは動いていますが拒否されました。RenderのALLOWED_ORIGINが ' + location.origin + ' と一致しているか確認してください'
+        : '中継サーバーに届きません。起動中かもしれません。1分ほど待つか、config.jsのrelayUrlを確認してください');
+      if (reachable) break;
+      if (i < 1) await new Promise(res => setTimeout(res, 6000));
     }
   }
   throw lastErr;
@@ -508,6 +515,7 @@ function initSettingsUI() {
   $('#optSound').onchange = e => { settings.sound = e.target.checked; saveSettings(); if (settings.sound) beep(false); };
   $('#optWake').onchange = e => { settings.wake = e.target.checked; saveSettings(); if (settings.wake) wakeLock(); else wakeSentinel && wakeSentinel.release().catch(() => {}); };
   $('#optPush').onchange = async (e) => {
+    e.target.disabled = true; if (e.target.checked) toast('プッシュ通知を登録中…（最大20秒）');
     try { e.target.checked ? await enablePush() : await disablePush(); toast(e.target.checked ? 'プッシュ通知を有効にしました' : 'プッシュ通知を無効にしました'); }
     catch (err) { e.target.checked = false; settings.push = false; saveSettings(); toast(err.message || 'プッシュ通知を有効にできません'); }
     sync();
