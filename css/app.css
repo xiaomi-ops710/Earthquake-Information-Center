@@ -277,6 +277,9 @@ svg { fill: currentColor; }
 .fab:hover { border-radius: 50%; }
 .fab:active { transform: scale(.9); }
 
+/* 地理院タイルを暗色化（反転 + 色相回転で地形の色味を保つ） */
+.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.82) contrast(.92) saturate(.7); }
+
 /* quake marker */
 .qm { position: relative; width: var(--s); height: var(--s); }
 .qm b {
