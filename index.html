@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>地震・津波速報</title>
+<meta name="theme-color" content="#1a1210">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="地震速報">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="appbar">
+    <div class="appbar__lead">
+      <svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><use href="#i-wave"/></svg>
+      <h1>地震速報</h1>
+    </div>
+    <div class="appbar__trail">
+      <span id="status" class="status" data-state="connecting" role="status">
+        <i class="status__dot"></i><span id="statusText">接続中</span>
+      </span>
+      <button id="btnSettings" class="icon-btn" aria-label="設定">
+        <svg viewBox="0 0 24 24"><use href="#i-settings"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="alerts" class="alerts" aria-live="assertive"></div>
+
+  <main id="panes" class="panes" data-view="map">
+    <section id="listPane" class="pane pane--list" aria-label="地震履歴">
+      <div class="list-head">
+        <h2>発生履歴</h2>
+        <div class="chips" role="radiogroup" aria-label="絞り込み">
+          <button class="chip" role="radio" data-filter="all">すべて</button>
+          <button class="chip" role="radio" data-filter="s3">震度3以上</button>
+          <button class="chip" role="radio" data-filter="s5">震度5弱以上</button>
+        </div>
+      </div>
+      <ol id="list" class="list"></ol>
+      <p id="empty" class="empty" hidden>表示できる地震情報がありません</p>
+    </section>
+
+    <section id="mapPane" class="pane pane--map" aria-label="地図">
+      <div id="map"></div>
+      <button id="btnFit" class="fab" aria-label="日本全体を表示">
+        <svg viewBox="0 0 24 24"><use href="#i-fit"/></svg>
+      </button>
+      <article id="detail" class="detail" hidden></article>
+    </section>
+  </main>
+
+  <nav class="navbar" aria-label="表示切替">
+    <button class="navbar__item" data-view="map" aria-current="page">
+      <span class="navbar__pill"><svg viewBox="0 0 24 24"><use href="#i-map"/></svg></span>
+      <span>地図</span>
+    </button>
+    <button class="navbar__item" data-view="list">
+      <span class="navbar__pill"><svg viewBox="0 0 24 24"><use href="#i-list"/></svg><b id="badgeNew" hidden></b></span>
+      <span>履歴</span>
+    </button>
+  </nav>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<dialog id="settings" class="dialog">
+  <form method="dialog" class="dialog__body">
+    <h2>設定</h2>
+
+    <div class="row">
+      <div class="row__text"><b>ブラウザ通知</b><small id="permNote">新着時にこの端末へ通知します</small></div>
+      <label class="switch"><input type="checkbox" id="optNotify"><span></span></label>
+    </div>
+
+    <div class="row row--col">
+      <div class="row__text"><b>通知する最小震度</b><small>履歴の通知・プッシュ通知の対象</small></div>
+      <div class="chips" id="minScale" role="radiogroup">
+        <button type="button" class="chip" role="radio" data-v="10">1</button>
+        <button type="button" class="chip" role="radio" data-v="30">3</button>
+        <button type="button" class="chip" role="radio" data-v="40">4</button>
+        <button type="button" class="chip" role="radio" data-v="45">5弱</button>
+        <button type="button" class="chip" role="radio" data-v="55">6弱</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="row__text"><b>プッシュ通知（FCM）</b><small id="pushNote">アプリを閉じていても即時に受信</small></div>
+      <label class="switch"><input type="checkbox" id="optPush"><span></span></label>
+    </div>
+
+    <div class="row">
+      <div class="row__text"><b>サウンド</b><small>新着・警報時に音を鳴らします</small></div>
+      <label class="switch"><input type="checkbox" id="optSound"><span></span></label>
+    </div>
+
+    <div class="row">
+      <div class="row__text"><b>画面を点灯したままにする</b><small>iPadを据え置きで使うときに便利</small></div>
+      <label class="switch"><input type="checkbox" id="optWake"><span></span></label>
+    </div>
+
+    <p id="installNote" class="note" hidden>iPad/iPhoneで通知を受け取るには、Safariの共有ボタンから「ホーム画面に追加」してPWAとして起動してください。</p>
+
+    <div class="dialog__actions">
+      <button type="button" class="btn btn--text" id="btnClear">キャッシュ消去</button>
+      <button type="submit" class="btn btn--filled">閉じる</button>
+    </div>
+    <p class="credit">データ: P2P地震情報 / 地図: © OpenStreetMap contributors © CARTO</p>
+  </form>
+</dialog>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 48 48"><path d="M3 25h8l4-12 7 24 6-30 5 22 3-4h9" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<script src="config.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
