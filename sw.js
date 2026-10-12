@@ -1,5 +1,5 @@
 /* Service Worker: オフラインキャッシュ + FCM バックグラウンド通知 */
-const VER = 'v2.1.0';
+const VER = 'v2.1.1';
 const SHELL = `shell-${VER}`, TILES = 'tiles-v1', LIBS = 'libs-v1';
 const SHELL_FILES = ['./', './index.html', './css/app.css', './js/app.js', './js/geo.js', './js/stats.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
@@ -59,6 +59,15 @@ async function swr(req, cacheName, opts = {}) {
   const net = fetch(req).then(r => { if (r && (r.ok || r.type === 'opaque')) cache.put(req, r.clone()); return r; }).catch(() => null);
   return hit || (await net) || Response.error();
 }
+/* 自サイトのファイルはネットワーク優先（古い index.html / app.js が居座る版ずれを防ぐ）。オフライン時のみキャッシュ */
+async function nf(req, cacheName, opts = {}) {
+  const cache = await caches.open(cacheName);
+  try {
+    const r = await Promise.race([fetch(new Request(req, { cache: 'no-cache' })), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4500))]);
+    if (r && r.ok) cache.put(req, r.clone());
+    return r;
+  } catch { return (await cache.match(req, opts)) || Response.error(); }
+}
 async function tile(req) {
   const cache = await caches.open(TILES);
   const hit = await cache.match(req);
@@ -82,9 +91,9 @@ self.addEventListener('fetch', (e) => {
   if (url.hostname.endsWith('googleapis.com') || url.hostname === 'fonts.gstatic.com') return e.respondWith(swr(req, LIBS));
   if (url.origin === location.origin) {
     if (req.mode === 'navigate') {
-      return e.respondWith(swr(new Request('./index.html'), SHELL, { ignoreSearch: true }));
+      return e.respondWith(nf(new Request('./index.html'), SHELL, { ignoreSearch: true }));
     }
-    return e.respondWith(swr(req, SHELL, { ignoreSearch: true }));
+    return e.respondWith(nf(req, SHELL, { ignoreSearch: true }));
   }
 });
 
