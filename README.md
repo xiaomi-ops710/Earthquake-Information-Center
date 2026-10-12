@@ -3,6 +3,8 @@
 P2P地震情報 API（REST `/history` + WebSocket）を使うリアルタイム地震・津波速報。Material 3 Expressive をベースにした NERV 風ダークUI（iPad 3カラム対応）、Leaflet 地図、localStorage キャッシュ、FCM プッシュ対応。
 
 ## 構成
+- `js/geo.js` … 都道府県・距離・現在地判定・P2P地域コード表の取得（感知の地点表示に使用）
+- `js/stats.js` … 統計画面の描画
 - `index.html / css/app.css / js/app.js` … アプリ本体（ビルド不要）
 - `sw.js` … オフラインキャッシュ + FCM バックグラウンド通知
 - `config.js` … Firebase / 中継サーバーURL の設定
