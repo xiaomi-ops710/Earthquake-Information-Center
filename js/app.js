@@ -6,7 +6,21 @@ const CFG = Object.assign({
   apiBase: 'https://api.p2pquake.net/v2', wsUrl: 'wss://api.p2pquake.net/v2/ws',
   historyLimit: 100, firebase: {}, vapidKey: '', relayUrl: ''
 }, self.APP_CONFIG || {});
-const G = window.Geo;
+/* js/geo.js が読み込めなかった場合の簡易版（都道府県の選択・現在地の登録・距離計算だけ動く。地域別の感知は無効） */
+const FALLBACK_PREFS = [[1,'北海道',43.064,141.347],[2,'青森県',40.824,140.740],[3,'岩手県',39.704,141.153],[4,'宮城県',38.269,140.872],[5,'秋田県',39.719,140.102],[6,'山形県',38.240,140.364],[7,'福島県',37.750,140.468],[8,'茨城県',36.342,140.447],[9,'栃木県',36.566,139.884],[10,'群馬県',36.391,139.060],[11,'埼玉県',35.857,139.649],[12,'千葉県',35.605,140.123],[13,'東京都',35.690,139.692],[14,'神奈川県',35.448,139.643],[15,'新潟県',37.902,139.023],[16,'富山県',36.695,137.211],[17,'石川県',36.595,136.626],[18,'福井県',36.065,136.222],[19,'山梨県',35.664,138.568],[20,'長野県',36.651,138.181],[21,'岐阜県',35.391,136.722],[22,'静岡県',34.977,138.383],[23,'愛知県',35.180,136.907],[24,'三重県',34.730,136.509],[25,'滋賀県',35.004,135.869],[26,'京都府',35.021,135.756],[27,'大阪府',34.686,135.520],[28,'兵庫県',34.691,135.183],[29,'奈良県',34.685,135.833],[30,'和歌山県',34.226,135.168],[31,'鳥取県',35.504,134.238],[32,'島根県',35.472,133.051],[33,'岡山県',34.662,133.935],[34,'広島県',34.397,132.460],[35,'山口県',34.186,131.471],[36,'徳島県',34.066,134.559],[37,'香川県',34.340,134.043],[38,'愛媛県',33.842,132.766],[39,'高知県',33.560,133.531],[40,'福岡県',33.607,130.418],[41,'佐賀県',33.249,130.299],[42,'長崎県',32.745,129.874],[43,'熊本県',32.790,130.742],[44,'大分県',33.238,131.613],[45,'宮崎県',31.911,131.424],[46,'鹿児島県',31.560,130.558],[47,'沖縄県',26.212,127.681]];
+function fallbackHaversine(la1, lo1, la2, lo2) {
+  const r = (x) => x * Math.PI / 180, dl = r(la2 - la1), dn = r(lo2 - lo1);
+  const h = Math.sin(dl / 2) ** 2 + Math.cos(r(la1)) * Math.cos(r(la2)) * Math.sin(dn / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+const FALLBACK_GEO = {
+  PREFS: FALLBACK_PREFS, byCode: new Map(FALLBACK_PREFS.map(p => [p[0], p])), haversine: fallbackHaversine,
+  async reversePref(lat, lon) { const p = FALLBACK_PREFS.reduce((b, x) => (fallbackHaversine(lat, lon, x[2], x[3]) < fallbackHaversine(lat, lon, b[2], b[3]) ? x : b)); return { code: p[0], name: p[1], label: p[1] + '付近' }; },
+  async loadAreas() { return new Map(); }
+};
+const GEO_OK = !!(window.Geo && window.Geo.PREFS && window.Geo.byCode);
+const G = GEO_OK ? window.Geo : FALLBACK_GEO;
+const ST = window.Stats && window.Stats.render ? window.Stats : { bindTips() {}, render(body) { body.innerHTML = '<p class="hint" style="padding:16px">統計モジュール（js/stats.js）を読み込めませんでした。</p>'; } };
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1094,8 +1108,8 @@ let statsDays = 30;
 async function openStats() {
   const dlg = $('#stats'); dlg.showModal();
   const body = $('#statsBody');
-  Stats.bindTips(body, $('#tip'));
-  const draw = () => Stats.render(body, state.events, statsDays, Date.now(), { end: state.histEnd });
+  ST.bindTips(body, $('#tip'));
+  const draw = () => ST.render(body, state.events, statsDays, Date.now(), { end: state.histEnd });
   $$('#statsPeriod .chip').forEach(c => c.setAttribute('aria-checked', String(+c.dataset.v === statsDays)));
   draw();
   await ensureLoadedUntil(Date.now() - statsDays * DAY, 20, draw);
@@ -1361,7 +1375,7 @@ function init() {
   addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#overlay').hidden) hideOverlay(); else if (state.kiosk) setKiosk(false, { quiet: true }); } });
   $('#statsClose').addEventListener('click', () => $('#stats').close());
   $('#stats').addEventListener('click', e => { if (e.target === $('#stats')) $('#stats').close(); });
-  $('#statsPeriod').addEventListener('click', e => { const c = e.target.closest('.chip'); if (!c) return; statsDays = +c.dataset.v; openStats.redraw && 0; $$('#statsPeriod .chip').forEach(x => x.setAttribute('aria-checked', String(x === c))); const draw = () => Stats.render($('#statsBody'), state.events, statsDays, Date.now(), { end: state.histEnd }); draw(); ensureLoadedUntil(Date.now() - statsDays * DAY, 20, draw).then(() => $('#stats').open && draw()); });
+  $('#statsPeriod').addEventListener('click', e => { const c = e.target.closest('.chip'); if (!c) return; statsDays = +c.dataset.v; openStats.redraw && 0; $$('#statsPeriod .chip').forEach(x => x.setAttribute('aria-checked', String(x === c))); const draw = () => ST.render($('#statsBody'), state.events, statsDays, Date.now(), { end: state.histEnd }); draw(); ensureLoadedUntil(Date.now() - statsDays * DAY, 20, draw).then(() => $('#stats').open && draw()); });
   $('#alerts').addEventListener('click', e => { if (e.target.closest('[data-act="open-settings"]')) $('#btnSettings').click(); });
 
   // 再生
@@ -1387,12 +1401,23 @@ function init() {
   }
 }
 /* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
-const APP_VER = '2.1.1';
+const APP_VER = '2.1.2';
+async function fileProblems() {                      // 読み込めなかった js ファイルの原因（404 など）を調べる
+  const out = [];
+  for (const [f, ok] of [['js/geo.js', GEO_OK], ['js/stats.js', !!(window.Stats && window.Stats.render)]]) {
+    if (ok) continue;
+    let st = '通信エラー';
+    try { const r = await fetch(f + '?chk=' + Date.now(), { cache: 'no-store' }); st = r.ok ? '取得はできるが中身が正しくありません（別のファイルが入っている可能性）' : `HTTP ${r.status}（リポジトリに ${f} がありません）`; } catch { /* keep */ }
+    out.push(`${f}: ${st}`);
+  }
+  return out;
+}
 function banner(html) {
   let b = $('#eqmBanner');
   if (!b) { b = document.createElement('div'); b.id = 'eqmBanner'; b.setAttribute('role', 'alert'); document.body.appendChild(b); }
-  b.innerHTML = html + ' <button type="button" id="eqmBannerBtn">キャッシュを消して再読み込み</button>';
+  b.innerHTML = `<div class="eqmb__msg">${html}</div><div class="eqmb__act"><button type="button" id="eqmBannerBtn">キャッシュを消して再読み込み</button><button type="button" id="eqmBannerX" class="eqmb__x" aria-label="閉じる">×</button></div>`;
   $('#eqmBannerBtn').onclick = hardReload;
+  $('#eqmBannerX').onclick = () => b.remove();
 }
 async function hardReload() {
   try { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.unregister())); } catch { /* noop */ }
@@ -1414,6 +1439,7 @@ try {
     else banner(`⚠ ${bad.join(' / ')} が古いままです。GitHub に最新版（js/app.js と同じ v${APP_VER}）をアップロードしてください。`);
   } else sessionStorage.removeItem('eqm.healed');
   init();
+  if (!GEO_OK || !(window.Stats && window.Stats.render)) fileProblems().then(p => { if (p.length) banner('⚠ 一部のファイルを読み込めないため簡易モードで動作中です。<br>' + p.map(esc).join('<br>')); });
 } catch (e) {
   console.error(e); banner(`⚠ 初期化エラー: ${esc(e && e.message || e)}`);
 }
