@@ -1054,6 +1054,10 @@ h1, h2, h3, .dialog h2, .sheet__head h2, .detail h3 {
 .row .btn { flex: none; white-space: nowrap; }
 
 /* 版チェック用（js/app.js と一致しないと警告を表示） */
-:root { --app-ver: "2.1.1"; }
-#eqmBanner { position: fixed; z-index: 9999; left: 12px; right: 12px; top: calc(var(--sat) + 8px); padding: 12px 16px; border-radius: 16px; background: var(--md-error-container); color: var(--md-on-error-container); border: 1px solid var(--md-error); font-size: 14px; font-weight: 600; box-shadow: var(--shadow); }
-#eqmBanner button { margin-left: 8px; height: 38px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--md-error); color: #fff; font-weight: 700; cursor: pointer; }
+:root { --app-ver: "2.1.2"; }
+#eqmBanner { position: fixed; z-index: 9999; left: 50%; transform: translateX(-50%); bottom: calc(var(--sab) + 14px); width: min(720px, calc(100vw - 24px)); display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 16px; border-radius: 18px; background: var(--md-error-container); color: var(--md-on-error-container); border: 1px solid var(--md-error); font-size: 13.5px; font-weight: 600; line-height: 1.55; box-shadow: var(--shadow); }
+#eqmBanner .eqmb__msg { flex: 1; min-width: 0; }
+#eqmBanner .eqmb__act { display: flex; gap: 8px; flex: none; }
+#eqmBanner button { height: 40px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--md-error); color: #fff; font: 700 13px var(--font); cursor: pointer; }
+#eqmBanner .eqmb__x { width: 40px; padding: 0; font-size: 20px; background: rgb(255 255 255 / .14); }
+@media (max-width: 560px) { #eqmBanner { flex-direction: column; align-items: stretch; } #eqmBanner .eqmb__act { justify-content: flex-end; } }
