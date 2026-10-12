@@ -199,7 +199,7 @@ function initMap() {
   shakeLayer = L.layerGroup().addTo(map);
   layer = L.layerGroup().addTo(map);
   map.fitBounds(JP_BOUNDS, { padding: [10, 10] });
-  new ResizeObserver(() => map.invalidateSize()).observe($('#mapWrap'));
+  new ResizeObserver(() => map.invalidateSize()).observe($('#mapWrap') || $('#mapPane'));
   renderHomeMarker();
 }
 function markerIcon(ev, pulse) {
@@ -1315,12 +1315,14 @@ function init() {
   initMap();
   initSettingsUI();
   renderLegend();
-  $('#btnMon').addEventListener('click', openMonitor);
-  $('#monClose').addEventListener('click', () => $('#monitor').close());
-  $('#monitor').addEventListener('close', () => { mon.open = false; cancelAnimationFrame(mon.raf); });
-  $('#btnDiag').addEventListener('click', runDiag);
-  $('#btnDrill').addEventListener('click', startDrill);
-  $('#btnCsv').addEventListener('click', exportCsv);
+  // 新機能のボタン: HTML が古くて要素が無くても、他のボタンの初期化を止めない
+  const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
+  on('#btnMon', 'click', openMonitor);
+  on('#monClose', 'click', () => $('#monitor').close());
+  on('#monitor', 'close', () => { mon.open = false; cancelAnimationFrame(mon.raf); });
+  on('#btnDiag', 'click', runDiag);
+  on('#btnDrill', 'click', startDrill);
+  on('#btnCsv', 'click', exportCsv);
   syncFilterUI();
 
   // 一覧・絞り込み
@@ -1384,5 +1386,35 @@ function init() {
     navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.type === 'notification-click') setView('list'); });
   }
 }
-init();
+/* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
+const APP_VER = '2.1.1';
+function banner(html) {
+  let b = $('#eqmBanner');
+  if (!b) { b = document.createElement('div'); b.id = 'eqmBanner'; b.setAttribute('role', 'alert'); document.body.appendChild(b); }
+  b.innerHTML = html + ' <button type="button" id="eqmBannerBtn">キャッシュを消して再読み込み</button>';
+  $('#eqmBannerBtn').onclick = hardReload;
+}
+async function hardReload() {
+  try { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.unregister())); } catch { /* noop */ }
+  try { for (const k of await caches.keys()) await caches.delete(k); } catch { /* noop */ }
+  location.replace(location.pathname + '?r=' + Date.now());
+}
+function versionMismatch() {
+  const bad = [], mv = ($('meta[name="app-version"]') || {}).content || '';
+  const cv = getComputedStyle(document.documentElement).getPropertyValue('--app-ver').replace(/["'\s]/g, '');
+  if (mv !== APP_VER) bad.push('index.html');
+  if (cv !== APP_VER) bad.push('css/app.css');
+  return bad;
+}
+try {
+  const bad = versionMismatch();
+  if (bad.length) {
+    // まず自動でキャッシュを消して1回だけ再読み込み。それでも直らなければアップロード漏れなので画面に表示
+    if (!sessionStorage.getItem('eqm.healed')) { sessionStorage.setItem('eqm.healed', '1'); hardReload(); }
+    else banner(`⚠ ${bad.join(' / ')} が古いままです。GitHub に最新版（js/app.js と同じ v${APP_VER}）をアップロードしてください。`);
+  } else sessionStorage.removeItem('eqm.healed');
+  init();
+} catch (e) {
+  console.error(e); banner(`⚠ 初期化エラー: ${esc(e && e.message || e)}`);
+}
 })();
