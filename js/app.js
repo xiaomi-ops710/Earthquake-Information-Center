@@ -1181,6 +1181,7 @@ function monDraw(now) {
   c.stroke();
   c.font = '600 12px "Roboto Flex","Noto Sans JP",sans-serif'; c.textBaseline = 'middle';
   if (!areaTable) { c.fillStyle = 'rgba(200,200,210,.6)'; c.textAlign = 'center'; c.fillText('地域データを読み込み中…', w / 2, h / 2); c.textAlign = 'left'; }
+  else if (!areaTable.size) { c.fillStyle = 'rgba(255,200,120,.85)'; c.textAlign = 'center'; c.fillText('地域データを取得できません（感知の地点表示は無効）', w / 2, h / 2); c.textAlign = 'left'; }
   else { c.fillStyle = 'rgba(170,185,200,.34)'; areaTable.forEach(a => { const [x, y] = P(a.lat, a.lon); c.fillRect(x - 1, y - 1, 2.2, 2.2); }); }
 
   // 揺れの感知（直近60秒の件数を色と大きさで表現）
@@ -1295,6 +1296,7 @@ async function runDiag() {
   const t1 = performance.now();
   try { const r = await withTimeout(fetch(`${CFG.apiBase}/history?codes=551&limit=1`, { cache: 'no-store' }), 10000, 'timeout'); add(r.ok ? 'ok' : 'bad', 'P2P地震情報 API', `HTTP ${r.status} ・ ${Math.round(performance.now() - t1)}ms`); } catch { add('bad', 'P2P地震情報 API', '到達できません'); }
   add(state.status === 'live' ? 'ok' : 'warn', 'WebSocket', state.status === 'live' ? `ライブ ／ 最終受信 ${mon.lastMsg ? rel(mon.lastMsg) : '（起動後まだ受信なし）'}` : '未接続（再接続を試行中）');
+  try { const t = await withTimeout(G.loadAreas(), 12000, 'timeout'); add(t.size ? 'ok' : 'warn', '地域データ（感知）', t.size ? `${t.size}地域` : '取得できません（感知の地点表示は無効。通知・履歴には影響しません）'); } catch { add('warn', '地域データ（感知）', '取得できません'); }
   const top = state.events.slice().sort((a, b) => b.t - a.t)[0];
   add(top ? 'ok' : 'warn', '履歴データ', top ? `${state.events.length}件 ／ 最新 ${rel(top.t)}` : '未取得');
   out.innerHTML = rows.join('');
@@ -1401,7 +1403,7 @@ function init() {
   }
 }
 /* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
-const APP_VER = '2.1.2';
+const APP_VER = '2.2.0';
 async function fileProblems() {                      // 読み込めなかった js ファイルの原因（404 など）を調べる
   const out = [];
   for (const [f, ok] of [['js/geo.js', GEO_OK], ['js/stats.js', !!(window.Stats && window.Stats.render)]]) {
