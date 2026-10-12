@@ -4,24 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>地震・津波速報</title>
-<meta name="theme-color" content="#1b1716">
+<meta name="theme-color" content="#050506">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="地震速報">
 <script>
-try{var _s=JSON.parse(localStorage.getItem('eqm.settings.v1')||'{}'),_t=_s.theme||{};
-var _d=_t.mode==='dark'||(_t.mode!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);
+try{var _s=JSON.parse(localStorage.getItem('eqm.settings.v1')||'{}'),_t=(_s.uiVer===2&&_s.theme)||{};
+var _m=_t.mode||'dark',_d=_m==='dark'||(_m==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);
 document.documentElement.dataset.theme=_d?'dark':'light';
-document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(e){}
+document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(e){}
 </script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&family=Shippori+Mincho+B1:wght@700;800&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/app.css">
 </head>
@@ -31,7 +31,7 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
   <header class="appbar">
     <div class="appbar__lead">
       <svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><use href="#i-wave"/></svg>
-      <h1>地震速報</h1>
+      <div class="appbar__title"><h1>地震速報</h1><span class="en">SEISMIC MONITOR</span></div>
     </div>
     <div class="appbar__trail">
       <span id="status" class="status" data-state="connecting" role="status">
@@ -39,6 +39,9 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
       </span>
       <button id="btnKiosk" class="icon-btn" aria-label="据え置き表示モード" title="据え置き表示モード">
         <svg viewBox="0 0 24 24"><use href="#i-tv"/></svg>
+      </button>
+      <button id="btnMon" class="icon-btn" aria-label="リアルタイム監視" title="リアルタイム監視">
+        <svg viewBox="0 0 24 24"><use href="#i-pulse"/></svg>
       </button>
       <button id="btnStats" class="icon-btn" aria-label="統計">
         <svg viewBox="0 0 24 24"><use href="#i-chart"/></svg>
@@ -49,12 +52,14 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
     </div>
   </header>
 
+  <div id="legend" class="legend" aria-label="震度の凡例"></div>
+
   <div id="alerts" class="alerts" aria-live="assertive"></div>
 
   <main id="panes" class="panes" data-view="map">
     <section id="listPane" class="pane pane--list" aria-label="地震履歴">
       <div class="list-head">
-        <div class="list-title"><h2>発生履歴</h2><span id="count" class="count"></span></div>
+        <div class="list-title"><h2>発生履歴<span class="en">HISTORY</span></h2><span id="count" class="count"></span></div>
         <div class="search">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg>
           <input id="q" type="search" placeholder="地域名で検索（例: 能登、熊本）" enterkeyhint="search" autocomplete="off">
@@ -87,6 +92,7 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
     </section>
 
     <section id="mapPane" class="pane pane--map" aria-label="地図">
+      <div id="mapWrap" class="mapwrap">
       <div id="map"></div>
       <div id="shakeChip" class="shake-chip" hidden></div>
       <div class="fabs">
@@ -99,6 +105,7 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
         <input id="pbRange" type="range" min="0" max="1000" value="0" aria-label="時刻">
         <div id="pbSpeed" class="chips" role="radiogroup"><button class="chip" role="radio" data-v="1">×1</button><button class="chip" role="radio" data-v="2">×2</button><button class="chip" role="radio" data-v="4">×4</button></div>
         <div class="when"><b id="pbTime">—</b><span id="pbInfo"></span></div>
+      </div>
       </div>
       <article id="detail" class="detail" hidden></article>
     </section>
@@ -116,7 +123,7 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
   </nav>
 </div>
 
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="toast" class="toast" popover="manual" role="status" aria-live="polite"></div>
 
 <section id="kiosk" class="kiosk" hidden aria-label="据え置き表示モード">
   <header class="k-top">
@@ -189,6 +196,21 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
       <button type="button" class="btn btn--text" id="btnTest">送信</button>
     </div>
 
+    <div class="sec">診断・ツール</div>
+    <div class="row">
+      <div class="row__text"><b>接続診断</b><small>通知が届かないときの原因（許可・登録・サーバー・回線）を調べます</small></div>
+      <button type="button" class="btn btn--text" id="btnDiag">実行</button>
+    </div>
+    <div id="diagOut" class="diag" hidden></div>
+    <div class="row">
+      <div class="row__text"><b>防災訓練</b><small>緊急地震速報の警報画面・音声・カウントダウンを体験します（実際の警報ではありません）</small></div>
+      <button type="button" class="btn btn--text" id="btnDrill">開始</button>
+    </div>
+    <div class="row">
+      <div class="row__text"><b>履歴をCSVで保存</b><small>読み込み済みの履歴を書き出します（Excel / Numbers で開けます）</small></div>
+      <button type="button" class="btn btn--text" id="btnCsv">保存</button>
+    </div>
+
     <div class="sec">あなたの場所</div>
     <div class="homebox">
       <div id="homeText">未設定です。現在地を取得するか、都道府県を選んでください。</div>
@@ -256,10 +278,42 @@ document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(
   </div>
   <div id="statsBody" class="sheet__body"></div>
 </dialog>
+<dialog id="monitor" class="dialog dialog--full dialog--mon" aria-label="リアルタイム監視">
+  <div class="sheet__head">
+    <h2>リアルタイム監視<span class="en">LIVE MONITOR</span></h2>
+    <span id="monLink" class="pill pill--warn">接続中</span>
+    <button id="monClose" class="icon-btn" aria-label="閉じる"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
+  </div>
+  <div class="mon">
+    <section class="mon__scope" aria-label="揺れの感知マップ">
+      <canvas id="monCanvas"></canvas>
+      <div class="mon__legend" aria-hidden="true"><span class="lg"><i style="--c:#6db3f2"></i>1</span><span class="lg"><i style="--c:#4fd1a0"></i>2–4</span><span class="lg"><i style="--c:#ffe14d"></i>5–9</span><span class="lg"><i style="--c:#ff9f2e"></i>10–19</span><span class="lg"><i style="--c:#ff4538"></i>20+</span><small>件/分</small></div>
+    </section>
+    <aside class="mon__side">
+      <div class="mon__clock"><time id="monClock">--:--:--</time><span class="en">JST</span><span id="monSurge" class="pill pill--ok">平常</span></div>
+      <div class="mon__tiles">
+        <div class="tile"><small>感知（直近1分）</small><b id="monN60">0</b><span>件</span></div>
+        <div class="tile"><small>感知（直近10秒）</small><b id="monN10">0</b><span>件</span></div>
+        <div class="tile"><small>最多の地域</small><b id="monTop" class="tile__txt">—</b><span id="monTopN"></span></div>
+      </div>
+      <div class="card mon__card"><h3>感知数の推移<span class="en">LAST 10 MIN</span></h3><canvas id="monSpark" class="mon__spark"></canvas></div>
+      <div class="card mon__card mon__states">
+        <div><span>緊急地震速報</span><span id="monEew" class="pill pill--ok">発表なし</span></div>
+        <div><span>津波予報</span><span id="monTsu" class="pill pill--ok">発表なし</span></div>
+        <div><span>最終受信</span><b id="monLast">—</b></div>
+        <div><span>受信件数（起動後）</span><b id="monCount">0件</b></div>
+      </div>
+      <div class="card mon__card"><h3>直近の地震<span class="en">LATEST</span></h3><ul id="monLatest" class="mon__latest"></ul></div>
+      <div class="card mon__card"><h3>受信ログ<span class="en">FEED</span></h3><ul id="monFeed" class="mon__feed"></ul></div>
+      <p class="hint">感知は P2P 地震情報の利用者が端末で揺れを検知した参考情報で、震度ではありません。この画面を含め、アプリを開いている間に受信した分だけを表示します。</p>
+    </aside>
+  </div>
+</dialog>
 <div id="tip" class="tip" hidden></div>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2.5 12.5h4l2.4-6.5 4.2 12 2.6-7.2 1.4 1.7h4.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
     <symbol id="i-map" viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></symbol>

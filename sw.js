@@ -1,5 +1,5 @@
 /* Service Worker: オフラインキャッシュ + FCM バックグラウンド通知 */
-const VER = 'v1.0.3';
+const VER = 'v2.1.0';
 const SHELL = `shell-${VER}`, TILES = 'tiles-v1', LIBS = 'libs-v1';
 const SHELL_FILES = ['./', './index.html', './css/app.css', './js/app.js', './js/geo.js', './js/stats.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
@@ -13,14 +13,23 @@ try {
     importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
                   'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
     firebase.initializeApp(fb);
-    // データメッセージのみ送信される想定 → 自前で通知を表示
-    firebase.messaging().onBackgroundMessage((payload) => {
+    // 中継サーバーはデータメッセージのみ送る → 自前で通知を表示する
+    // ※ iOS の Web Push は「受信したら必ず通知を表示」が必須。重複時も表示は行い、音だけ抑える(renotify:false)。
+    firebase.messaging().onBackgroundMessage(async (payload) => {
       const d = payload.data || {};
-      const urgent = d.urgent === '1';
+      const tag = d.tag || 'quake';
+      let renotify = d.renotify !== '0';
+      try {
+        // 同じ発表(mid)で全国+地域の両トピックから届いた場合は、2通目を無音で置き換える
+        const cur = await self.registration.getNotifications({ tag });
+        if (d.mid && cur.some(n => n.data && n.data.mid === d.mid)) renotify = false;
+      } catch (e) { /* noop */ }
       return self.registration.showNotification(d.title || '地震情報', {
-        body: d.body || '', tag: d.tag || d.id || 'quake', renotify: true,
+        body: d.body || '', tag, renotify,
         icon: './icons/icon-192.png', badge: './icons/icon-192.png',
-        requireInteraction: urgent, data: { url: './' }
+        requireInteraction: d.urgent === '1',
+        timestamp: Date.now(),
+        data: { url: './', mid: d.mid || '', kind: d.kind || '' }
       });
     });
   }
@@ -30,7 +39,7 @@ try {
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
     const c = await caches.open(SHELL);
-    await Promise.all(SHELL_FILES.map(u => c.add(u).catch(() => {})));
+    await Promise.all(SHELL_FILES.map(u => c.add(new Request(u, { cache: 'reload' })).catch(() => {})));
     const l = await caches.open(LIBS);
     await Promise.all(LIB_FILES.map(u => l.add(new Request(u, { mode: 'cors' })).catch(() => {})));
     self.skipWaiting();
@@ -69,7 +78,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.hostname.endsWith('p2pquake.net')) return;                 // API は常にネットワーク
   if (url.hostname === 'cyberjapandata.gsi.go.jp') return e.respondWith(tile(req));
-  if (url.hostname === 'unpkg.com') return e.respondWith(swr(req, LIBS));
+  if (url.hostname === 'unpkg.com' || url.hostname === 'www.gstatic.com') return e.respondWith(swr(req, LIBS));
   if (url.hostname.endsWith('googleapis.com') || url.hostname === 'fonts.gstatic.com') return e.respondWith(swr(req, LIBS));
   if (url.origin === location.origin) {
     if (req.mode === 'navigate') {
@@ -84,8 +93,8 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   e.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const c = all[0];
-    if (c) { await c.focus(); c.postMessage({ type: 'notification-click' }); }
+    const c = all.find(x => x.visibilityState === 'visible') || all[0];
+    if (c) { try { await c.focus(); } catch (err) { /* noop */ } c.postMessage({ type: 'notification-click', kind: (e.notification.data || {}).kind || '' }); }
     else await self.clients.openWindow('./');
   })());
 });
