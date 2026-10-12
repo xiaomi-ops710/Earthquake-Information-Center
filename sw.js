@@ -1,7 +1,7 @@
 /* Service Worker: オフラインキャッシュ + FCM バックグラウンド通知 */
-const VER = 'v1.0.2';
+const VER = 'v1.0.3';
 const SHELL = `shell-${VER}`, TILES = 'tiles-v1', LIBS = 'libs-v1';
-const SHELL_FILES = ['./', './index.html', './css/app.css', './js/app.js', './config.js', './manifest.webmanifest',
+const SHELL_FILES = ['./', './index.html', './css/app.css', './js/app.js', './js/geo.js', './js/stats.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 const LIB_FILES = ['https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'];
 

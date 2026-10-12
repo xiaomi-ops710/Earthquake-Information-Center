@@ -4,12 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>地震・津波速報</title>
-<meta name="theme-color" content="#1a1210">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1b1716">
+<meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="地震速報">
+<script>
+try{var _s=JSON.parse(localStorage.getItem('eqm.settings.v1')||'{}'),_t=_s.theme||{};
+var _d=_t.mode==='dark'||(_t.mode!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);
+document.documentElement.dataset.theme=_d?'dark':'light';
+document.documentElement.style.setProperty('--h',_t.hue==null?38:_t.hue);}catch(e){}
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -31,6 +37,12 @@
       <span id="status" class="status" data-state="connecting" role="status">
         <i class="status__dot"></i><span id="statusText">接続中</span>
       </span>
+      <button id="btnKiosk" class="icon-btn" aria-label="据え置き表示モード" title="据え置き表示モード">
+        <svg viewBox="0 0 24 24"><use href="#i-tv"/></svg>
+      </button>
+      <button id="btnStats" class="icon-btn" aria-label="統計">
+        <svg viewBox="0 0 24 24"><use href="#i-chart"/></svg>
+      </button>
       <button id="btnSettings" class="icon-btn" aria-label="設定">
         <svg viewBox="0 0 24 24"><use href="#i-settings"/></svg>
       </button>
@@ -42,22 +54,52 @@
   <main id="panes" class="panes" data-view="map">
     <section id="listPane" class="pane pane--list" aria-label="地震履歴">
       <div class="list-head">
-        <h2>発生履歴</h2>
-        <div class="chips" role="radiogroup" aria-label="絞り込み">
-          <button class="chip" role="radio" data-filter="all">すべて</button>
-          <button class="chip" role="radio" data-filter="s3">震度3以上</button>
-          <button class="chip" role="radio" data-filter="s5">震度5弱以上</button>
+        <div class="list-title"><h2>発生履歴</h2><span id="count" class="count"></span></div>
+        <div class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="q" type="search" placeholder="地域名で検索（例: 能登、熊本）" enterkeyhint="search" autocomplete="off">
+          <button id="btnFilter" class="icon-btn icon-btn--sm" aria-label="絞り込み" aria-expanded="false"><svg viewBox="0 0 24 24"><use href="#i-tune"/></svg><b id="filterBadge" hidden></b></button>
+        </div>
+        <div id="filterPanel" class="filters" hidden>
+          <div class="fgroup"><span>最大震度</span>
+            <div class="chips" role="radiogroup" data-key="scale">
+              <button class="chip chip--sm" role="radio" data-v="all">すべて</button><button class="chip chip--sm" role="radio" data-v="s3">3以上</button><button class="chip chip--sm" role="radio" data-v="s5">5弱以上</button>
+            </div></div>
+          <div class="fgroup"><span>マグニチュード</span>
+            <div class="chips" role="radiogroup" data-key="mag">
+              <button class="chip chip--sm" role="radio" data-v="0">指定なし</button><button class="chip chip--sm" role="radio" data-v="4">M4以上</button><button class="chip chip--sm" role="radio" data-v="5">M5以上</button><button class="chip chip--sm" role="radio" data-v="6">M6以上</button>
+            </div></div>
+          <div class="fgroup"><span>期間</span>
+            <div class="chips" role="radiogroup" data-key="period">
+              <button class="chip chip--sm" role="radio" data-v="all">すべて</button><button class="chip chip--sm" role="radio" data-v="1d">24時間</button><button class="chip chip--sm" role="radio" data-v="7d">7日</button><button class="chip chip--sm" role="radio" data-v="30d">30日</button>
+            </div></div>
+          <div class="fgroup"><span>日付を指定</span>
+            <div class="dates"><input id="dFrom" class="field" type="date" aria-label="開始日"><span>〜</span><input id="dTo" class="field" type="date" aria-label="終了日"></div></div>
+          <label class="check"><input type="checkbox" id="fHome"> あなたの地域で揺れた地震のみ</label>
+          <div><button id="btnResetFilter" class="btn btn--text btn--sm" type="button">条件をリセット</button></div>
         </div>
       </div>
-      <ol id="list" class="list"></ol>
-      <p id="empty" class="empty" hidden>表示できる地震情報がありません</p>
+      <div id="scroll" class="scroll">
+        <ol id="list" class="list"></ol>
+        <p id="empty" class="empty" hidden>条件に合う地震情報がありません</p>
+        <div id="more" class="more"></div>
+      </div>
     </section>
 
     <section id="mapPane" class="pane pane--map" aria-label="地図">
       <div id="map"></div>
-      <button id="btnFit" class="fab" aria-label="日本全体を表示">
-        <svg viewBox="0 0 24 24"><use href="#i-fit"/></svg>
-      </button>
+      <div id="shakeChip" class="shake-chip" hidden></div>
+      <div class="fabs">
+        <button id="btnPlay" class="fab fab--sm" aria-label="時系列再生" aria-pressed="false"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></button>
+        <button id="btnLocate" class="fab fab--sm" aria-label="現在地"><svg viewBox="0 0 24 24"><use href="#i-pin"/></svg></button>
+        <button id="btnFit" class="fab" aria-label="日本全体を表示"><svg viewBox="0 0 24 24"><use href="#i-fit"/></svg></button>
+      </div>
+      <div id="playbar" class="playbar" hidden>
+        <button id="pbToggle" class="play" aria-label="再生/一時停止" aria-pressed="false"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></button>
+        <input id="pbRange" type="range" min="0" max="1000" value="0" aria-label="時刻">
+        <div id="pbSpeed" class="chips" role="radiogroup"><button class="chip" role="radio" data-v="1">×1</button><button class="chip" role="radio" data-v="2">×2</button><button class="chip" role="radio" data-v="4">×4</button></div>
+        <div class="when"><b id="pbTime">—</b><span id="pbInfo"></span></div>
+      </div>
       <article id="detail" class="detail" hidden></article>
     </section>
   </main>
@@ -76,44 +118,122 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<dialog id="settings" class="dialog">
-  <form method="dialog" class="dialog__body">
+<section id="kiosk" class="kiosk" hidden aria-label="据え置き表示モード">
+  <header class="k-top">
+    <div class="k-clock"><div class="k-time"><time id="kTime">--:--</time><span id="kSec"></span></div><div id="kDate" class="k-date"></div></div>
+    <div class="k-ctl">
+      <span id="kStatus" class="status" data-state="connecting"><i class="status__dot"></i><span class="t">接続中</span></span>
+      <button id="kDim" class="btn btn--tonal btn--sm" type="button" aria-pressed="false">減光</button>
+      <button id="kExit" class="icon-btn" type="button" aria-label="通常表示に戻る"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
+    </div>
+  </header>
+  <div id="kAlerts" class="alerts" aria-live="assertive"></div>
+  <div class="k-body"><div id="kMain" class="k-main"></div><ol id="kList" class="k-list"></ol></div>
+  <div id="kShake" class="k-shake" hidden></div>
+</section>
+
+<div id="overlay" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="ovTitle" data-tone="eq" hidden>
+  <div class="overlay__card">
+    <div id="ovKind" class="overlay__kind"></div>
+    <div id="ovBadge" class="badge overlay__badge" hidden></div>
+    <h2 id="ovTitle"></h2>
+    <p id="ovSub"></p>
+    <div id="ovCd" class="cd" hidden></div>
+    <button id="ovClose" class="btn btn--filled btn--lg" type="button">閉じる</button>
+  </div>
+</div>
+
+<dialog id="settings" class="dialog dialog--settings">
+  <form method="dialog" class="dialog__scroll"><div class="dialog__body">
     <h2>設定</h2>
 
+    <div class="sec">通知</div>
     <div class="row">
       <div class="row__text"><b>ブラウザ通知</b><small id="permNote">新着時にこの端末へ通知します</small></div>
       <label class="switch"><input type="checkbox" id="optNotify"><span></span></label>
     </div>
-
-    <div class="row row--col">
-      <div class="row__text"><b>通知する最小震度</b><small>履歴の通知・プッシュ通知の対象</small></div>
-      <div class="chips" id="minScale" role="radiogroup">
-        <button type="button" class="chip" role="radio" data-v="10">1</button>
+    <div class="row">
+      <div class="row__text"><b>全国の通知</b><small>最大震度がしきい値以上の地震を通知</small></div>
+      <label class="switch"><input type="checkbox" id="optNation"><span></span></label>
+    </div>
+    <div class="row row--col" id="nationBox">
+      <div class="chips" id="minScale" role="radiogroup" aria-label="全国の最小震度">
+        <button type="button" class="chip" role="radio" data-v="10">震度1</button>
         <button type="button" class="chip" role="radio" data-v="30">3</button>
         <button type="button" class="chip" role="radio" data-v="40">4</button>
         <button type="button" class="chip" role="radio" data-v="45">5弱</button>
         <button type="button" class="chip" role="radio" data-v="55">6弱</button>
       </div>
     </div>
-
+    <div class="row">
+      <div class="row__text"><b>地域別通知</b><small>選んだ都道府県で揺れたときだけ通知</small></div>
+      <label class="switch"><input type="checkbox" id="optRegion"><span></span></label>
+    </div>
+    <div class="row row--col" id="regionBox">
+      <select id="regionPref" class="field" aria-label="通知する都道府県"></select>
+      <div class="chips" id="regionMin" role="radiogroup" aria-label="地域の最小震度">
+        <button type="button" class="chip" role="radio" data-v="10">震度1</button>
+        <button type="button" class="chip" role="radio" data-v="30">3</button>
+        <button type="button" class="chip" role="radio" data-v="40">4</button>
+        <button type="button" class="chip" role="radio" data-v="45">5弱</button>
+        <button type="button" class="chip" role="radio" data-v="55">6弱</button>
+      </div>
+      <p class="hint">全国と地域の両方がオンで条件を満たすと、同じ地震で通知が重なる場合があります。全国のしきい値は高め、地域は低めがおすすめです。</p>
+    </div>
     <div class="row">
       <div class="row__text"><b>プッシュ通知（FCM）</b><small id="pushNote">アプリを閉じていても即時に受信</small></div>
       <label class="switch"><input type="checkbox" id="optPush"><span></span></label>
     </div>
+    <div class="row">
+      <div class="row__text"><b>テスト通知</b><small>プッシュが届くか確認（アプリを閉じて確認すると確実）</small></div>
+      <button type="button" class="btn btn--text" id="btnTest">送信</button>
+    </div>
 
+    <div class="sec">あなたの場所</div>
+    <div class="homebox">
+      <div id="homeText">未設定です。現在地を取得するか、都道府県を選んでください。</div>
+      <div class="btns">
+        <button type="button" class="btn btn--tonal btn--sm" id="btnLocateSet">現在地を取得</button>
+        <select id="homePref" class="field" aria-label="都道府県を手動で選ぶ"></select>
+        <button type="button" class="btn btn--text btn--sm" id="btnHomeClear">解除</button>
+      </div>
+      <p class="hint">位置情報はこの端末の中だけに保存され、サーバーには送りません。地震の震源までの距離表示と、緊急地震速報のS波到達カウントダウン（推定）に使います。</p>
+    </div>
+
+    <div class="sec">表示</div>
+    <div class="row row--col">
+      <div class="row__text"><b>テーマ</b></div>
+      <div class="chips" id="themeMode" role="radiogroup">
+        <button type="button" class="chip" role="radio" data-v="auto">自動</button>
+        <button type="button" class="chip" role="radio" data-v="light">ライト</button>
+        <button type="button" class="chip" role="radio" data-v="dark">ダーク</button>
+      </div>
+    </div>
+    <div class="row row--col">
+      <div class="row__text"><b>配色</b></div>
+      <div class="swatches" id="swatches" role="radiogroup" aria-label="配色テーマ"></div>
+    </div>
+    <div class="row">
+      <div class="row__text"><b>みんなの揺れ感知</b><small>P2Pユーザーの揺れ感知をリアルタイム表示（参考値）</small></div>
+      <label class="switch"><input type="checkbox" id="optShake"><span></span></label>
+    </div>
+
+    <div class="sec">音・画面</div>
     <div class="row">
       <div class="row__text"><b>サウンド</b><small>新着・警報時に音を鳴らします</small></div>
       <label class="switch"><input type="checkbox" id="optSound"><span></span></label>
     </div>
-
+    <div class="row">
+      <div class="row__text"><b>音声読み上げ</b><small>新着や警報を日本語で読み上げ（アプリ表示中のみ）</small></div>
+      <label class="switch"><input type="checkbox" id="optSpeak"><span></span></label>
+    </div>
+    <div class="row">
+      <div class="row__text"><b>全画面警報</b><small>緊急地震速報・震度6弱以上・津波警報で画面いっぱいに表示</small></div>
+      <label class="switch"><input type="checkbox" id="optFull"><span></span></label>
+    </div>
     <div class="row">
       <div class="row__text"><b>画面を点灯したままにする</b><small>iPadを据え置きで使うときに便利</small></div>
       <label class="switch"><input type="checkbox" id="optWake"><span></span></label>
-    </div>
-
-    <div class="row">
-      <div class="row__text"><b>テスト通知</b><small>プッシュ通知が届くか確認します（アプリを閉じて確認すると確実）</small></div>
-      <button type="button" class="btn btn--text" id="btnTest">送信</button>
     </div>
 
     <p id="installNote" class="note" hidden>iPad/iPhoneで通知を受け取るには、Safariの共有ボタンから「ホーム画面に追加」してPWAとして起動してください。</p>
@@ -122,9 +242,21 @@
       <button type="button" class="btn btn--text" id="btnClear">キャッシュ消去</button>
       <button type="submit" class="btn btn--filled">閉じる</button>
     </div>
-    <p class="credit">データ: P2P地震情報 / 地図: © OpenStreetMap contributors © CARTO</p>
-  </form>
+    <p class="credit">データ: P2P地震情報 / 地図: 地理院タイル / 地域コード: p2pquake/epsp-specifications</p>
+  </div></form>
 </dialog>
+
+<dialog id="stats" class="dialog dialog--full" aria-label="統計">
+  <div class="sheet__head">
+    <h2>統計</h2>
+    <div id="statsPeriod" class="chips" role="radiogroup" aria-label="集計期間">
+      <button class="chip" role="radio" data-v="7">7日</button><button class="chip" role="radio" data-v="30">30日</button><button class="chip" role="radio" data-v="90">90日</button>
+    </div>
+    <button id="statsClose" class="icon-btn" aria-label="閉じる"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
+  </div>
+  <div id="statsBody" class="sheet__body"></div>
+</dialog>
+<div id="tip" class="tip" hidden></div>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
@@ -134,12 +266,23 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
     <symbol id="i-fit" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></symbol>
     <symbol id="i-warn" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+    <symbol id="i-tune" viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></symbol>
+    <symbol id="i-tv" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></symbol>
     <symbol id="i-wave" viewBox="0 0 48 48"><path d="M3 25h8l4-12 7 24 6-30 5 22 3-4h9" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </defs>
 </svg>
 
 <script src="config.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/stats.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
