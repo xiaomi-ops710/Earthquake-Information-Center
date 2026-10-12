@@ -726,3 +726,334 @@ body.kiosk-dim .kiosk { filter: brightness(.45) saturate(.8); }
   .k-meta { justify-content: center; }
 }
 @media (max-height: 560px) { .k-list li:nth-child(n+4) { display: none; } .k-time time { font-size: 56px; } }
+
+
+/* =========================================================
+   v3 — NERV 防災端末テーマ（Material 3 Expressive ベース）
+   黒地 / 信号オレンジ / 警報レッド / MAGI グリーン。
+   形は M3 Expressive（大きな角丸・押すと丸くなる）のまま、
+   明朝の見出し・Orbitron の数字・日英併記で特務機関の端末らしさを出す。
+   ========================================================= */
+:root {
+  --h: 48;
+  --md-primary: oklch(0.80 0.17 var(--h));
+  --md-on-primary: oklch(0.22 0.05 var(--h));
+  --md-primary-container: oklch(0.35 0.10 var(--h));
+  --md-on-primary-container: oklch(0.93 0.06 var(--h));
+  --md-secondary: oklch(0.82 0.04 var(--h));
+  --md-on-secondary: oklch(0.25 0.03 var(--h));
+  --md-secondary-container: oklch(0.29 0.035 var(--h));
+  --md-on-secondary-container: oklch(0.93 0.03 var(--h));
+  --md-tertiary: oklch(0.86 0.15 92);                    /* 注意報・接続中 = 琥珀 */
+  --md-tertiary-container: oklch(0.36 0.08 92);
+  --md-on-tertiary-container: oklch(0.94 0.08 92);
+  --md-error: oklch(0.70 0.22 27);
+  --md-on-error: #fff;
+  --md-error-container: oklch(0.37 0.16 27);
+  --md-on-error-container: oklch(0.93 0.05 25);
+
+  --md-surface: oklch(0.11 0.004 var(--h));
+  --md-surface-container-lowest: oklch(0.08 0.004 var(--h));
+  --md-surface-container-low: oklch(0.145 0.005 var(--h));
+  --md-surface-container: oklch(0.175 0.006 var(--h));
+  --md-surface-container-high: oklch(0.21 0.007 var(--h));
+  --md-surface-container-highest: oklch(0.25 0.008 var(--h));
+  --md-on-surface: oklch(0.95 0.006 var(--h));
+  --md-on-surface-variant: oklch(0.76 0.02 var(--h));
+  --md-outline: oklch(0.55 0.035 var(--h));
+  --md-outline-variant: oklch(0.31 0.025 var(--h));
+  --md-inverse-surface: oklch(0.95 0.006 var(--h));
+  --md-inverse-on-surface: oklch(0.2 0.01 var(--h));
+  --shadow: 0 10px 28px rgb(0 0 0 / .65);
+
+  --eew-bg: oklch(0.50 0.23 27);
+  --major-bg: oklch(0.40 0.20 345);
+  --major-fg: oklch(0.95 0.04 345);
+  --ok: oklch(0.86 0.19 150);                            /* ライブ = MAGI グリーン */
+  --home: oklch(0.80 0.12 232);
+
+  --font: "Roboto Flex", "Noto Sans JP", system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  --font-title: "Shippori Mincho B1", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+  --font-num: "Orbitron", "Roboto Flex", "Noto Sans JP", system-ui, sans-serif;
+  --hex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.34V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z' fill='%23ff8a1f' fill-opacity='0.05'/%3E%3C/svg%3E");
+}
+:root[data-theme="light"] { --hex: none; --md-tertiary: oklch(0.52 0.13 80); --md-tertiary-container: oklch(0.93 0.07 90); --md-on-tertiary-container: oklch(0.3 0.08 80); --ok: oklch(0.55 0.16 150); }
+
+body { font-size: 15px; background: var(--md-surface); }
+h1, h2, h3, .dialog h2, .sheet__head h2, .detail h3 {
+  font-family: var(--font-title); font-variation-settings: normal; font-weight: 800; letter-spacing: .05em;
+}
+:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+
+/* 日英併記の小見出し（NERV 端末の流儀） */
+.en { font: 700 10px/1 var(--font); letter-spacing: .2em; color: var(--md-primary); text-transform: uppercase; }
+.list-head h2 .en { margin-left: 12px; font-family: var(--font); }
+.appbar__title { display: grid; gap: 4px; min-width: 0; }
+.appbar__title .en { display: block; }
+.appbar h1 { font-variation-settings: normal; letter-spacing: .1em; line-height: 1.05; }
+
+/* ---------- レイアウトの骨格（空の .alerts が行をずらす不具合の修正） ---------- */
+.app { display: flex; flex-direction: column; gap: 6px; }
+.appbar, .legend, .alerts, .navbar { flex: none; }
+.panes { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+
+/* ---------- アプリバー / 凡例 ---------- */
+.logo {
+  width: 46px; height: 46px; padding: 10px; border-radius: 0;
+  background: var(--md-primary); color: var(--md-on-primary);
+  clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%);
+  transition: transform .5s var(--spring);
+}
+.appbar__lead:hover .logo { border-radius: 0; transform: rotate(60deg); }
+.status { font-family: var(--font); letter-spacing: .04em; border: 1px solid var(--md-outline-variant); background: var(--md-surface-container); }
+.status[data-state="live"] { border-color: color-mix(in oklab, var(--ok) 55%, transparent); background: color-mix(in oklab, var(--ok) 12%, var(--md-surface-container)); color: var(--ok); }
+.status[data-state="offline"] { border-color: transparent; }
+.icon-btn { background: var(--md-surface-container); border: 1px solid var(--md-outline-variant); }
+.icon-btn:hover { border-color: var(--md-primary); }
+
+.legend { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; padding: 2px 16px 2px; font: 600 12.5px/1 var(--font); color: var(--md-on-surface-variant); }
+.legend:empty { display: none; }
+.lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lg i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px color-mix(in oklab, var(--c) 70%, transparent); }
+
+/* ---------- ペイン ---------- */
+.pane { border: 1px solid var(--md-outline-variant); }
+.pane--list { background: var(--hex), var(--md-surface-container-low); }
+.mapwrap { position: absolute; inset: 0; z-index: 0; }
+.pane--map { grid-template-rows: minmax(0, 1fr); }
+
+/* ---------- 一覧 ---------- */
+.item { background: var(--md-surface-container); border: 1px solid transparent; }
+.item:hover { border-color: var(--md-outline-variant); }
+.item[aria-pressed="true"] { border-color: var(--md-primary); }
+.item__time { font: 500 11px/1.5 var(--font-num); letter-spacing: .03em; }
+.item__time span:first-child { color: var(--md-on-surface); }
+.count { font: 600 12px/1 var(--font-num); color: var(--md-primary); }
+.badge { font-family: var(--font-num); font-weight: 900; font-variation-settings: normal; box-shadow: inset 0 0 0 2px rgb(0 0 0 / .32); }
+.badge small { font-family: var(--font); }
+.fgroup > span { letter-spacing: .12em; }
+.search { border: 1px solid var(--md-outline-variant); background: var(--md-surface-container); }
+.chip { border-color: var(--md-outline-variant); }
+.chip[aria-checked="true"] { background: var(--md-primary-container); color: var(--md-on-primary-container); box-shadow: inset 0 0 0 1px var(--md-primary); }
+
+/* ---------- 地図 ---------- */
+:root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.74) contrast(1.12) saturate(.3); }
+.leaflet-container { background: #020203; }
+.mapwrap::after {                                         /* モニターの格子 */
+  content: ""; position: absolute; inset: 0; z-index: 450; pointer-events: none;
+  background-image: linear-gradient(color-mix(in oklab, var(--md-primary) 7%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklab, var(--md-primary) 7%, transparent) 1px, transparent 1px);
+  background-size: 72px 72px;
+}
+:root[data-theme="light"] .mapwrap::after { display: none; }
+.qm b { font-family: var(--font-num); }
+.fab--sm, .leaflet-control-zoom a { border: 1px solid var(--md-outline-variant) !important; }
+.shake-chip, .playbar { border: 1px solid var(--md-outline-variant); }
+
+/* ---------- 詳細 ---------- */
+.detail { border: 1px solid var(--md-outline-variant); background: var(--md-surface-container); }
+.detail h3 { letter-spacing: .04em; }
+.detail h4 { letter-spacing: .14em; }
+.fact b { font-family: var(--font-num); font-weight: 700; font-variation-settings: normal; }
+.detail__time, .detail .meta { font-family: var(--font); }
+.detail .meta span:last-child { font-family: var(--font-num); font-size: 12px; }
+
+/* ---------- 津波 / 緊急地震速報 ---------- */
+.alert { border: 1px solid rgb(255 255 255 / .14); }
+.alert__title { font-family: var(--font-title); font-variation-settings: normal; letter-spacing: .06em; }
+.alert__title em { display: block; font: 700 10px/1.5 var(--font); letter-spacing: .22em; opacity: .85; font-style: normal; }
+.alert--eew { position: relative; overflow: hidden; padding-top: 0; background: var(--eew-bg); color: #fff; box-shadow: 0 0 0 1px rgb(255 255 255 / .2), 0 0 36px color-mix(in oklab, var(--eew-bg) 70%, transparent); }
+.alert--eew::before {                                     /* ハザードストライプ */
+  content: ""; display: block; height: 12px; margin: 0 -18px 12px;
+  background: repeating-linear-gradient(-45deg, #0b0b0b 0 12px, #ffc400 12px 24px);
+}
+.alert--eew .alert__title { font-size: clamp(22px, 3vw, 30px); }
+.eewstat { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 10px; border-radius: var(--r-md); overflow: hidden; background: rgb(0 0 0 / .45); }
+.eewstat > div { display: grid; gap: 2px; align-content: center; padding: 8px 14px; background: rgb(0 0 0 / .3); min-width: 0; }
+.eewstat small { font-size: 10.5px; letter-spacing: .08em; opacity: .85; }
+.eewstat b { font: 800 clamp(18px, 2.6vw, 28px)/1.1 var(--font-num); overflow-wrap: anywhere; }
+.eewstat__loc b { font-family: var(--font-title); letter-spacing: .04em; }
+.eewstat b u { font: 600 .55em var(--font); text-decoration: none; margin-left: 2px; }
+.eewstat__max b { font-size: clamp(28px, 4.2vw, 46px); }
+.cd { background: rgb(0 0 0 / .5); padding: 10px 18px; }
+.cd .lbl em { display: block; font: 700 9.5px/1.4 var(--font); letter-spacing: .2em; opacity: .75; font-style: normal; }
+.cd .num { font-family: var(--font-num); font-weight: 900; font-variation-settings: normal; font-size: clamp(44px, 9vw, 88px); letter-spacing: .01em; text-shadow: 0 0 22px rgb(255 255 255 / .25); }
+.cd .num i { font-style: normal; opacity: .22; }
+.cd.arrived .num { font-family: var(--font-title); font-size: 26px; }
+
+/* ---------- 全画面警報 ---------- */
+.overlay { background: oklch(0.36 0.17 27); }
+.overlay::before, .overlay::after {
+  content: ""; position: fixed; left: 0; right: 0; height: calc(var(--sat) + 26px); z-index: 1;
+  background: repeating-linear-gradient(-45deg, #0b0b0b 0 18px, #ffc400 18px 36px);
+}
+.overlay::before { top: 0; }
+.overlay::after { bottom: 0; height: calc(var(--sab) + 26px); }
+.overlay__card { position: relative; z-index: 2; }
+.overlay__kind { font-family: var(--font); background: rgb(0 0 0 / .45); border: 1px solid rgb(255 255 255 / .3); }
+.overlay h2 { font-family: var(--font-title); font-variation-settings: normal; letter-spacing: .04em; }
+.overlay .cd .num { font-size: clamp(56px, 14vw, 120px); }
+
+/* ---------- 据え置き ---------- */
+.kiosk { background: var(--md-surface); }
+.k-time time { font-family: var(--font-num); font-weight: 700; font-variation-settings: normal; letter-spacing: .02em; text-shadow: 0 0 28px color-mix(in oklab, var(--md-primary) 35%, transparent); }
+.k-time span { font-family: var(--font-num); color: var(--md-primary); }
+.k-main { background: var(--hex), var(--md-surface-container-low); border: 1px solid var(--md-outline-variant); }
+.k-name { font-family: var(--font-title); font-variation-settings: normal; letter-spacing: .04em; }
+.k-list li { border: 1px solid var(--md-outline-variant); }
+.k-label { letter-spacing: .14em; }
+
+/* ---------- トースト / ダイアログ ---------- */
+.toast { background: var(--md-surface-container-highest); color: var(--md-on-surface); border: 1px solid var(--md-primary); box-shadow: var(--shadow); }
+.dialog { border: 1px solid var(--md-outline-variant); }
+.sec { letter-spacing: .16em; display: flex; align-items: center; gap: 10px; }
+.sec::after { content: ""; flex: 1; height: 1px; background: var(--md-outline-variant); }
+.tile b, .hrow .lab { font-family: var(--font-num); font-variation-settings: normal; }
+
+/* =========================================================
+   iPad 最適化
+   - 縦 / 横 / Split View すべてに追従（幅ベースのブレークポイント）
+   - 横向き(≥1180px)は「一覧 | 地図 | 詳細」の3カラム。詳細は地図の上に被せず横に並べる
+   - タッチ領域 44px 以上、入力欄は 16px 以上（iOS の自動ズーム防止）
+   ========================================================= */
+.search input, .field, select.field { font-size: 16px; }
+@media (min-width: 720px) {
+  body { font-size: 16px; }
+  .icon-btn:not(.icon-btn--sm) { width: 52px; height: 52px; }
+  .icon-btn--sm { width: 44px; height: 44px; }
+  .appbar { padding: 12px 24px 0; }
+  .alerts { padding: 0 20px; }
+  .legend { font-size: 13px; gap: 4px 22px; }
+  .panes { padding: 0 20px calc(20px + var(--sab)); gap: 16px; }
+  .chip { height: 42px; padding: 0 18px; }
+  .chip--sm { height: 38px; }
+  .item { padding: 12px 18px 12px 12px; min-height: 80px; }
+  .item__title { font-size: 17px; }
+  .badge { width: 60px; height: 60px; }
+  .btn--sm { height: 42px; }
+  .detail .x { width: 44px; height: 44px; }
+  .fab--sm { width: 56px; height: 56px; }
+  .leaflet-control-zoom a { width: 48px !important; height: 48px !important; line-height: 48px !important; }
+  .dialog--settings { width: min(640px, calc(100vw - 32px)); }
+  .row { padding: 14px 4px; }
+}
+@media (min-width: 720px) and (max-width: 1179px) {            /* iPad 縦 / mini 横 / Split View: 詳細は地図の下にシート表示 */
+  .panes { grid-template-columns: clamp(320px, 44vw, 400px) minmax(0, 1fr); }
+  .detail { left: 12px; right: 12px; width: auto; max-height: 56%; }
+  .playbar { margin-right: 84px; }
+}
+@media (min-width: 1180px) {                                     /* iPad Air / Pro 横向き: 3カラム */
+  .panes { grid-template-columns: clamp(340px, 27vw, 440px) minmax(0, 1fr); }
+  .panes[data-view] .pane--map { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .mapwrap { position: relative; inset: auto; min-width: 0; min-height: 0; }
+  .detail {
+    position: relative; left: auto; bottom: auto; z-index: 1;
+    width: clamp(340px, 27vw, 420px); max-height: none; height: 100%; min-height: 0;
+    border: 0; border-left: 1px solid var(--md-outline-variant); border-radius: 0; box-shadow: none; animation: none;
+    background: var(--md-surface-container-low); padding: 20px 22px calc(22px + var(--sab));
+  }
+  .detail[hidden] { display: none; }
+  .detail__top .badge { width: 72px; height: 72px; font-size: 30px; }
+}
+@media (min-width: 1500px) {
+  .panes { grid-template-columns: 480px minmax(0, 1fr); }
+  .detail { width: 460px; }
+}
+@media (max-height: 520px) and (orientation: landscape) { .legend { display: none; } }
+@media (hover: none) {                                           /* タッチ端末: 押しっぱなし後に hover 状態が残らないように */
+  .item:hover { background: var(--md-surface-container); border-color: transparent; }
+  .item[aria-pressed="true"]:hover { background: var(--md-primary-container); border-color: var(--md-primary); }
+  .icon-btn:hover { border-color: var(--md-outline-variant); }
+}
+
+.item__meta { column-gap: 8px; }
+.search { min-width: 0; }
+
+/* ---------- 小さい画面（iPhone / Slide Over） ---------- */
+@media (max-width: 719px) {
+  .appbar__title .en { display: none; }
+  .logo { width: 38px; height: 38px; padding: 8px; }
+  .appbar h1 { font-size: 20px; letter-spacing: .06em; white-space: nowrap; }
+  .appbar .icon-btn { width: 44px; height: 44px; }
+  .status { padding: 0 10px; }
+  .legend { flex-wrap: nowrap; gap: 8px; font-size: 11px; padding: 0 8px; overflow: hidden; }
+  .lg { gap: 4px; }
+  .lg i { width: 8px; height: 8px; }
+}
+@media (max-width: 719px) {
+  .appbar { gap: 6px; padding-inline: 10px; }
+  .appbar h1 { font-size: 17px; letter-spacing: .03em; }
+  .status { font-size: 11px; padding: 0 8px; gap: 5px; }
+  .appbar .icon-btn { width: 40px; height: 40px; }
+  .appbar__title { flex: 1; min-width: 0; }
+}
+
+/* =========================================================
+   v4 — リアルタイム監視モニタ / 診断 / 状態ピル
+   ========================================================= */
+.toast[popover] { inset: auto; left: 50%; bottom: calc(88px + var(--sab)); margin: 0; width: max-content; height: auto; overflow: visible; }
+@media (min-width: 720px) { .toast[popover] { bottom: calc(32px + var(--sab)); } }
+.toast[popover]:not(:popover-open) { display: none; }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; border-radius: var(--r-full); font-size: 12px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; border: 1px solid transparent; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill--ok { color: var(--ok); background: color-mix(in oklab, var(--ok) 13%, transparent); border-color: color-mix(in oklab, var(--ok) 40%, transparent); }
+.pill--warn { color: var(--md-tertiary); background: color-mix(in oklab, var(--md-tertiary) 13%, transparent); border-color: color-mix(in oklab, var(--md-tertiary) 40%, transparent); }
+.pill--bad { color: #fff; background: var(--md-error); border-color: transparent; animation: live 1.4s infinite; }
+.pill--bad::before { background: #fff; }
+
+.dialog--mon { width: min(1320px, calc(100vw - 16px)); height: min(900px, calc(100dvh - 16px)); }
+.dialog--mon .sheet__head h2 { flex: 1; }
+.mon { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 14px; padding: 8px 20px calc(20px + var(--sab)); }
+.mon__scope { position: relative; min-height: 0; border-radius: var(--r-xl); background: #020203; border: 1px solid var(--md-outline-variant); overflow: hidden; }
+.mon__scope canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.mon__legend { position: absolute; left: 14px; bottom: 12px; display: flex; align-items: center; gap: 12px; padding: 7px 14px; border-radius: var(--r-full); background: rgb(0 0 0 / .6); border: 1px solid var(--md-outline-variant); font-size: 12px; font-weight: 600; }
+.mon__legend small { color: var(--md-on-surface-variant); }
+.mon__side { min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 10px; align-content: start; padding-right: 2px; }
+.mon__clock { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.mon__clock time { font: 700 clamp(34px, 4.6vw, 54px)/1 var(--font-num); letter-spacing: .02em; font-variant-numeric: tabular-nums; text-shadow: 0 0 24px color-mix(in oklab, var(--md-primary) 40%, transparent); }
+.mon__clock .pill { margin-left: auto; align-self: center; }
+.mon__tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mon__tiles .tile b { font-family: var(--font-num); font-size: 30px; font-variation-settings: normal; }
+.mon__tiles .tile .tile__txt { font-family: var(--font-title); font-size: 19px; line-height: 1.5; }
+.tile--hot { background: var(--md-error-container); box-shadow: inset 0 0 0 1px var(--md-error); }
+.mon__card { padding: 12px 14px 14px; }
+.mon__card h3 { font-size: 15px; margin-bottom: 8px; display: flex; align-items: baseline; gap: 10px; }
+.mon__spark { width: 100%; height: 88px; display: block; }
+.mon__states { display: grid; gap: 8px; }
+.mon__states > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13.5px; }
+.mon__states > div > span:first-child { color: var(--md-on-surface-variant); }
+.mon__states b { font: 700 13px var(--font-num); }
+.mon__latest, .mon__feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mon__latest li { display: flex; align-items: center; gap: 12px; }
+.mon__latest .badge { width: 40px; height: 40px; font-size: 15px; border-radius: 13px; flex: none; }
+.mon__latest div { display: grid; min-width: 0; }
+.mon__latest b { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon__latest small { color: var(--md-on-surface-variant); font-size: 12px; }
+.mon__feed li { display: grid; grid-template-columns: auto 1fr; gap: 10px; font-size: 12.5px; padding: 4px 0; border-bottom: 1px dashed var(--md-outline-variant); }
+.mon__feed time { font: 500 11.5px var(--font-num); color: var(--md-on-surface-variant); }
+.mon__feed li.warn span { color: var(--md-tertiary); }
+.mon__feed li.bad span { color: var(--md-error); font-weight: 700; }
+.mon li.empty, .mon__feed li.empty { color: var(--md-on-surface-variant); font-size: 12.5px; border: 0; display: block; }
+@media (max-width: 899px), (orientation: portrait) {
+  .mon { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(260px, 46%) minmax(0, 1fr); padding-inline: 12px; }
+}
+@media (max-width: 719px) { .dialog--mon { width: calc(100vw - 8px); height: calc(100dvh - 8px); } .mon__tiles .tile b { font-size: 24px; } }
+
+/* 診断 */
+.diag { display: grid; gap: 6px; margin: 4px 0 8px; }
+.diag .d { display: grid; grid-template-columns: 9rem 1fr; gap: 10px; padding: 9px 12px; border-radius: var(--r-md); background: var(--md-surface-container-highest); border-left: 4px solid var(--md-outline); font-size: 12.5px; line-height: 1.5; }
+.diag .d b { font-weight: 700; }
+.diag .d--ok { border-left-color: var(--ok); }
+.diag .d--warn { border-left-color: var(--md-tertiary); }
+.diag .d--bad { border-left-color: var(--md-error); }
+.diag .d--bad span { color: var(--md-error); }
+@media (max-width: 480px) { .diag .d { grid-template-columns: 1fr; gap: 2px; } }
+@media (max-width: 459px) { #btnKiosk { display: none; } }
+.dialog--mon { height: calc(100dvh - 16px); max-height: 1100px; }
+.sheet__head h2 .en { margin-left: 12px; font-family: var(--font); vertical-align: middle; }
+.row .btn { flex: none; white-space: nowrap; }
+
+/* 版チェック用（js/app.js と一致しないと警告を表示） */
+:root { --app-ver: "2.1.1"; }
+#eqmBanner { position: fixed; z-index: 9999; left: 12px; right: 12px; top: calc(var(--sat) + 8px); padding: 12px 16px; border-radius: 16px; background: var(--md-error-container); color: var(--md-on-error-container); border: 1px solid var(--md-error); font-size: 14px; font-weight: 600; box-shadow: var(--shadow); }
+#eqmBanner button { margin-left: 8px; height: 38px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--md-error); color: #fff; font-weight: 700; cursor: pointer; }
