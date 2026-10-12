@@ -28,10 +28,12 @@ const defaults = {
   region: { on: false, pref: 0, min: 30 },
   home: null,                                  // {lat, lon, pref(code), prefName, label, approx, at}
   filter: { scale: 'all', mag: 0, period: 'all', from: '', to: '', home: false },
-  theme: { mode: 'auto', hue: 38 },
+  theme: { mode: 'dark', hue: 48 },
   push: false, pushToken: null, pushSub: null
 };
+const UI_VER = 2;                                   // NERV テーマ導入: 既存ユーザーも一度だけダーク/オレンジへ切り替える
 const saved = load(K.settings, {});
+if (saved.uiVer !== UI_VER) { saved.theme = { mode: 'dark', hue: 48 }; saved.uiVer = UI_VER; }
 const settings = {
   ...defaults, ...saved,
   region: { ...defaults.region, ...(saved.region || {}) },
@@ -39,6 +41,7 @@ const settings = {
   filter: { ...defaults.filter, ...(typeof saved.filter === 'object' ? saved.filter : (saved.filter ? { scale: saved.filter } : {})) }
 };
 const saveSettings = () => save(K.settings, settings);
+saveSettings();
 
 /* ---------------- 状態 ---------------- */
 const state = {
@@ -56,15 +59,15 @@ function applyTheme() {
   const root = document.documentElement;
   root.dataset.theme = dark ? 'dark' : 'light';
   root.style.setProperty('--h', t.hue);
-  const meta = $('meta[name="theme-color"]'); if (meta) meta.content = dark ? '#1b1716' : '#fbf8f7';
+  const meta = $('meta[name="theme-color"]'); if (meta) meta.content = dark ? '#050506' : '#f6f3f1';
 }
 darkMQ.addEventListener && darkMQ.addEventListener('change', applyTheme);
 
 /* ---------------- 震度表現 ---------------- */
 const SCALE = {
-  10: ['1', '#9fb6d6', '#0b1a2e'], 20: ['2', '#62a8f0', '#031a30'], 30: ['3', '#62d68f', '#05210f'],
-  40: ['4', '#f4d94e', '#2a2200'], 45: ['5弱', '#ffab4d', '#331a00'], 46: ['5弱<small>以上</small>', '#ffab4d', '#331a00'],
-  50: ['5強', '#ff7a3d', '#330d00'], 55: ['6弱', '#ff4d55', '#ffffff'], 60: ['6強', '#d6246e', '#ffffff'], 70: ['7', '#a24dff', '#ffffff']
+  10: ['1', '#6db3f2', '#031526'], 20: ['2', '#4fd1a0', '#032015'], 30: ['3', '#ffe14d', '#2a2300'],
+  40: ['4', '#ff9f2e', '#2e1500'], 45: ['5弱', '#ff4538', '#ffffff'], 46: ['5弱<small>以上</small>', '#ff4538', '#ffffff'],
+  50: ['5強', '#d4143c', '#ffffff'], 55: ['6弱', '#d92ba6', '#ffffff'], 60: ['6強', '#9b3bef', '#ffffff'], 70: ['7', '#5a2bd9', '#ffffff']
 };
 const SPOKEN = { 1: '1', 2: '2', 3: '3', 4: '4', '5弱': '5じゃく', '5強': '5きょう', '6弱': 'ろくじゃく', '6強': 'ろっきょう', 7: 'なな' };
 const scaleInfo = (v, foreign) => {
@@ -196,7 +199,7 @@ function initMap() {
   shakeLayer = L.layerGroup().addTo(map);
   layer = L.layerGroup().addTo(map);
   map.fitBounds(JP_BOUNDS, { padding: [10, 10] });
-  new ResizeObserver(() => map.invalidateSize()).observe($('#mapPane'));
+  new ResizeObserver(() => map.invalidateSize()).observe($('#mapWrap'));
   renderHomeMarker();
 }
 function markerIcon(ev, pulse) {
@@ -398,9 +401,20 @@ function renderAlerts() {
   if (eew) {
     const m = eew.msg, h = (m.earthquake && m.earthquake.hypocenter) || {};
     const areas = [...new Set((m.areas || []).map(a => a.name).filter(Boolean))];
-    html += `<div class="alert alert--eew" role="alert"><div class="alert__head"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg>
-      <div><div class="alert__title">緊急地震速報（警報）</div><div class="alert__sub">${esc(h.name || '震源調査中')}${h.magnitude > 0 ? ` M${h.magnitude}` : ''} ・ 強い揺れに警戒してください</div></div>
-      <button class="alert__close" data-close="eew" aria-label="閉じる"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button></div>
+    const topScale = Math.max(0, ...(m.areas || []).map(a => (SCALE[a.scaleTo] ? a.scaleTo : SCALE[a.scaleFrom] ? a.scaleFrom : 0)));
+    const mx = topScale ? scaleInfo(topScale) : null;
+    const mag = h.magnitude > 0 ? Number(h.magnitude).toFixed(1) : '—';
+    const dep = h.depth > 0 ? `${h.depth}<u>km</u>` : h.depth === 0 ? 'ごく浅い' : '—';
+    html += `<div class="alert alert--eew" role="alert">
+      <div class="alert__head"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg>
+        <div><div class="alert__title">${m.drill ? '【訓練】' : ''}緊急地震速報<em>EMERGENCY EARTHQUAKE WARNING</em></div><div class="alert__sub">強い揺れに警戒してください</div></div>
+        <button class="alert__close" data-close="eew" aria-label="閉じる"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button></div>
+      <div class="eewstat">
+        <div class="eewstat__loc"><small>震源地</small><b>${esc(h.name || '調査中')}</b></div>
+        <div><small>マグニチュード</small><b>${mag}</b></div>
+        <div><small>深さ</small><b>${dep}</b></div>
+        <div class="eewstat__max"><small>予想最大震度</small><b>${mx ? esc(mx.plain) : '—'}</b></div>
+      </div>
       ${settings.home ? '<div class="cd" id="eewCd"></div>' : '<div class="cd"><span class="lbl">「設定」で現在地を登録すると、S波到達までのカウントダウンを表示します</span></div>'}
       ${areas.length ? `<details><summary>対象地域 ${areas.length}</summary><ul>${areas.slice(0, 40).map(a => `<li>${esc(a)}</li>`).join('')}</ul></details>` : ''}</div>`;
   }
@@ -451,6 +465,7 @@ function speak(text, urgent) {
 const spokenScale = (v) => SPOKEN[scaleInfo(v).plain] || scaleInfo(v).plain;
 let titleTimer = null; const baseTitle = document.title;
 function flash(urgent) {
+  if (urgent) $$('dialog[open]').forEach(d => d.close());      // 設定・統計・モニタを開いていても警報が隠れないように
   document.body.classList.remove('flash', 'flash--soft'); void document.body.offsetWidth;
   document.body.classList.add('flash'); if (!urgent) document.body.classList.add('flash--soft');
   setTimeout(() => document.body.classList.remove('flash', 'flash--soft'), urgent ? 4500 : 2400);
@@ -464,14 +479,20 @@ function updateBadge() {
   const b = $('#badgeNew'); b.hidden = !state.unread; b.textContent = state.unread;
   try { navigator.setAppBadge && (state.unread ? navigator.setAppBadge(state.unread) : navigator.clearAppBadge()); } catch { /* noop */ }
 }
+const pushActive = () => !!(settings.push && settings.pushToken && pushConfigured());
 async function notify(title, body, tag, urgent) {
   if (!settings.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!document.hidden) return;        // 画面を見ている間は、アプリ内の警報（音・フラッシュ・全画面）に任せる
+  if (pushActive()) return;            // バックグラウンドは FCM が通知する（二重通知の防止）
   const opts = { body, tag, renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', requireInteraction: !!urgent, data: { url: './' } };
   try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) return reg.showNotification(title, opts); new Notification(title, opts); } catch { /* noop */ }
 }
 function toast(msg) {
-  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 3400);
+  const t = $('#toast'); t.textContent = msg;
+  try { if (t.showPopover && !t.matches(':popover-open')) t.showPopover(); } catch { /* noop */ }   // <dialog> の最前面レイヤーより上に出す
+  requestAnimationFrame(() => t.classList.add('show'));
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.classList.remove('show'); setTimeout(() => { try { if (!t.classList.contains('show') && t.hidePopover) t.hidePopover(); } catch { /* noop */ } }, 350); }, 3400);
 }
 const quakeText = (ev) => {
   const si = scaleInfo(ev.scale, ev.type === 'Foreign');
@@ -561,7 +582,8 @@ function updateCd() {
   if (!c) { put('cd', '<span class="lbl">震源情報を解析中…</span>'); return; }
   if (c.rem > 0) {
     const sec = Math.ceil(c.rem);
-    put('cd', `<span class="lbl">S波（主要動）到達まで</span><span class="num">${sec}</span><span class="lbl">秒</span><small>震源から約${Math.round(c.dist)}km ・ 推定値です（気象庁の予測ではありません）。まず身の安全を確保してください。</small>`);
+    const s = c.rem.toFixed(2).padStart(6, '0'); let lead = (s.match(/^0+/) || [''])[0]; if (s[lead.length] === '.') lead = lead.slice(0, -1);
+    put('cd', `<span class="lbl">主要動（S波）到達まで<em>S-WAVE ETA</em></span><span class="num"><i>${lead}</i>${s.slice(lead.length)}</span><span class="lbl">秒</span><small>震源から約${Math.round(c.dist)}km ・ 推定値です（気象庁の予測ではありません）。まず身の安全を確保してください。</small>`);
     const sp = state.eew.spoken;
     [30, 20, 10, 5, 4, 3, 2, 1].forEach(t => { if (sec <= t && !sp.has(t) && sec > t - 1.6) { sp.add(t); if (t <= 10 || t % 10 === 0) speak(String(t), true); } });
   } else {
@@ -582,11 +604,11 @@ function applyEew(m) {
   const h = (m.earthquake && m.earthquake.hypocenter) || {};
   if (isNew) {
     flash(true); beep(true);
-    showOverlay({ tone: 'eew', eew: true, kind: '緊急地震速報（警報）', title: '強い揺れに警戒してください', sub: `${h.name || '震源調査中'}${h.magnitude > 0 ? ' M' + Number(h.magnitude).toFixed(1) : ''}` });
-    notify('緊急地震速報（警報）', `${h.name || '震源調査中'} 強い揺れに警戒してください`, 'eew', true);
-    speak('緊急地震速報。強い揺れに警戒してください。', true);
+    showOverlay({ tone: 'eew', eew: true, kind: m.drill ? '【訓練】緊急地震速報（警報）' : '緊急地震速報（警報）', title: m.drill ? 'これは訓練です。強い揺れに警戒' : '強い揺れに警戒してください', sub: `${h.name || '震源調査中'}${h.magnitude > 0 ? ' M' + Number(h.magnitude).toFixed(1) : ''}` });
+    if (!m.drill) notify('緊急地震速報（警報）', `${h.name || '震源調査中'} 強い揺れに警戒してください`, 'eew', true);
+    speak(m.drill ? 'これは訓練です。緊急地震速報。強い揺れに警戒してください。' : '緊急地震速報。強い揺れに警戒してください。', true);
   }
-  clearInterval(eewTick); eewTick = setInterval(updateCd, 250);
+  clearInterval(eewTick); eewTick = setInterval(updateCd, 80);
   clearTimeout(eewTimer); eewTimer = setTimeout(clearEew, 120000);
   const lat = Number(h.latitude), lon = Number(h.longitude);
   if (validCoord(lat, lon) && map) {
@@ -704,11 +726,14 @@ function shakeSweep() {
   }
 }
 
-function handle(m, live) {
+const recent = (m, ms) => { const t = parseJst(m.time || (m.issue && m.issue.time)); return Number.isFinite(t) && Date.now() - t < ms; };
+function handle(m, live, catchup) {
   if (!m || typeof m !== 'object') return;
+  if (live) { mon.lastMsg = Date.now(); mon.count++; if (m.code === 561) monDetect(m); else monFeed(m); }   // 監視モニタ用
+  const asLive = (ms) => live || (catchup && recent(m, ms));   // WebSocket が切れている間に出た情報（10分以内）
   switch (m.code) {
-    case 551: applyQuake(m, { live }); break;
-    case 552: applyTsunami(m, { live }); break;
+    case 551: applyQuake(m, { live: asLive(10 * 60e3) }); break;
+    case 552: applyTsunami(m, { live: asLive(30 * 60e3) }); break;
     case 556: if (live) applyEew(m); break;
     case 561: if (live) applyShake(m); break;
     default: break;
@@ -716,6 +741,7 @@ function handle(m, live) {
 }
 
 /* ---------------- REST: 履歴 ---------------- */
+const idCount = () => state.events.reduce((n, e) => n + e.ids.length, 0);
 async function fetchHistory(silent) {
   try {
     const [qr, tr] = await Promise.all([
@@ -724,10 +750,11 @@ async function fetchHistory(silent) {
     ]);
     if (!qr.ok) throw new Error(qr.status);
     const arr = await qr.json();
-    if (tr && tr.ok) { const ta = await tr.json(); if (ta[0]) applyTsunami(ta[0], { live: false }); }
-    arr.forEach(m => handle(m, false));
+    const catchup = state.events.length > 0, before = idCount(), wasInit = state.initialDone;   // 初回(キャッシュなし)は新着扱いにしない
+    if (tr && tr.ok) { const ta = await tr.json(); if (ta[0]) applyTsunami(ta[0], { live: catchup && recent(ta[0], 30 * 60e3) }); }
+    arr.slice().reverse().forEach(m => handle(m, false, catchup));            // 古い順に処理（最新の警報が最後に出る）
     if (!state.initialDone) { state.initialDone = true; state.offset = arr.length; state.histEnd = arr.length < 100; }
-    persist(); renderList(); renderMarkers();
+    if (!silent || !wasInit || idCount() !== before) { persist(); renderList(); renderMarkers(); }
     if (!silent) toast('履歴を更新しました');
     return true;
   } catch (e) {
@@ -786,6 +813,7 @@ document.addEventListener('visibilitychange', () => {
   fetchHistory(true); wakeLock();
 });
 setInterval(() => $$('[data-rel]').forEach(el => { el.textContent = rel(+el.dataset.rel); }), 30000);
+setInterval(() => { if (!document.hidden && navigator.onLine) fetchHistory(true); }, 60000);   // 保険のポーリング
 
 /* ---------------- 表示切替 ---------------- */
 function setView(v) {
@@ -834,7 +862,7 @@ function pbUpdate(force) {
 
 /* ---------------- 現在地 ---------------- */
 function setHome(h) {
-  settings.home = h; saveSettings(); renderHomeMarker(); renderList(); syncSettingsUI();
+  settings.home = h; saveSettings(); renderHomeMarker(); renderList(); syncSettingsUI(); syncPushSoon();
   if (state.selected) { const ev = state.events.find(e => e.id === state.selected); ev && renderDetail(ev); }
   renderAlerts();
 }
@@ -867,62 +895,110 @@ async function wakeLock() {
 const loadScript = (src) => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
 const FB_VER = '10.12.2';
 const pushConfigured = () => !!(CFG.firebase.apiKey && CFG.vapidKey && CFG.relayUrl);
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 async function relay(path, body) {
-  const url = CFG.relayUrl.replace(/\/$/, '') + path;
+  const base = CFG.relayUrl.replace(/\/$/, '');
   let lastErr;
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 6; i++) {                      // Render 無料プランの起動待ち（最大 約1分）に耐える
     try {
-      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error('中継サーバーがエラーを返しました (' + r.status + ')');
-      return r.json().catch(() => ({}));
+      const r = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (r.ok) return r.json().catch(() => ({}));
+      const e = new Error('中継サーバーがエラーを返しました (' + r.status + ')'); e.status = r.status;
+      if ([502, 503, 504].includes(r.status)) { lastErr = e; await sleep(8000); continue; }   // 起動中
+      throw e;
     } catch (e) {
-      if (!(e instanceof TypeError)) throw e;
+      if (e.status) throw e;
       let reachable = false;
-      try { await fetch(CFG.relayUrl.replace(/\/$/, '') + '/healthz', { mode: 'no-cors', cache: 'no-store' }); reachable = true; } catch { /* unreachable */ }
-      lastErr = new Error(reachable
-        ? '中継サーバーは動いていますが拒否されました。RenderのALLOWED_ORIGINが ' + location.origin + ' と一致しているか確認してください'
-        : '中継サーバーに届きません。起動中かもしれません。1分ほど待つか、config.jsのrelayUrlを確認してください');
-      if (reachable) break;
-      if (i < 1) await new Promise(res => setTimeout(res, 6000));
+      try { await fetch(base + '/healthz', { mode: 'no-cors', cache: 'no-store' }); reachable = true; } catch { /* unreachable */ }
+      if (reachable) throw new Error('中継サーバーは動いていますが拒否されました。RenderのALLOWED_ORIGINが ' + location.origin + ' と一致しているか確認してください');
+      lastErr = new Error('中継サーバーに届きません。起動中かもしれません。1分ほど待つか、config.jsのrelayUrlを確認してください');
+      await sleep(8000);
     }
   }
   throw lastErr;
 }
 const desiredSub = () => ({
   nation: settings.nation ? settings.minScale : null,
-  region: settings.region.on && settings.region.pref ? { pref: settings.region.pref, min: settings.region.min } : null
+  region: settings.region.on && settings.region.pref ? { pref: settings.region.pref, name: regionPrefName(), min: settings.region.min } : null
 });
-async function syncPush() {
+const sameSub = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+async function syncPush(force) {
   if (!settings.push || !settings.pushToken) return;
   const d = desiredSub();
+  if (!force && sameSub(settings.pushSub, d) && Date.now() - (settings.pushAt || 0) < 3 * DAY) return;
   await relay('/subscribe', { token: settings.pushToken, ...d, prev: settings.pushSub || null });
-  settings.pushSub = d; saveSettings();
+  settings.pushSub = d; settings.pushAt = Date.now(); saveSettings();
 }
 let syncTimer = null;
-const syncPushSoon = () => { clearTimeout(syncTimer); syncTimer = setTimeout(() => syncPush().catch(e => toast(e.message || '通知設定の同期に失敗しました')), 700); };
-async function enablePush() {
-  if (!pushConfigured()) throw new Error('config.js に Firebase / relay の設定が必要です');
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('この環境はプッシュ通知に未対応です（iPadはホーム画面に追加して起動してください）');
-  if (Notification.permission !== 'granted') { const p = await Notification.requestPermission(); if (p !== 'granted') throw new Error('通知が許可されていません'); }
+const syncPushSoon = () => {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    try { await syncPush(); }
+    catch (e) {
+      if (e && e.status === 400) { try { await refreshPush({ renew: true }); return; } catch (e2) { e = e2; } }   // トークン失効 → 取り直し
+      toast((e && e.message) || '通知設定の同期に失敗しました');
+    }
+  }, 700);
+};
+async function ensureFirebase() {
   if (!window.firebase) {
     await loadScript(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-messaging-compat.js`);
   }
   if (!firebase.apps.length) firebase.initializeApp(CFG.firebase);
-  const reg = await navigator.serviceWorker.ready;
-  const token = await firebase.messaging().getToken({ vapidKey: CFG.vapidKey, serviceWorkerRegistration: reg });
+  bindForeground();
+}
+let fgBound = false;
+function bindForeground() {            // アプリ表示中にプッシュが届いた場合: WebSocket が死んでいるときだけアプリ内で知らせる
+  if (fgBound) return; fgBound = true;
+  try {
+    firebase.messaging().onMessage((p) => {
+      const d = p.data || {};
+      if (state.status === 'live') return;
+      flash(d.urgent === '1'); beep(d.urgent === '1');
+      toast(`${d.title || '地震情報'}：${String(d.body || '').split('\n')[0]}`);
+      fetchHistory(true);
+    });
+  } catch { /* noop */ }
+}
+async function getFcmToken() {
+  const reg = await withTimeout(navigator.serviceWorker.ready, 15000, 'Service Worker の準備に失敗しました。アプリを開き直してください');
+  const token = await withTimeout(firebase.messaging().getToken({ vapidKey: CFG.vapidKey, serviceWorkerRegistration: reg }), 20000, 'トークン取得がタイムアウトしました');
   if (!token) throw new Error('トークンを取得できません');
-  settings.pushToken = token; settings.pushSub = null;
+  return token;
+}
+async function enablePush() {
+  if (!pushConfigured()) throw new Error('config.js に Firebase / relay の設定が必要です');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('この環境はプッシュ通知に未対応です（iPadはホーム画面に追加して起動してください）');
+  if (Notification.permission !== 'granted') { const p = await Notification.requestPermission(); if (p !== 'granted') throw new Error('通知が許可されていません'); }
+  await ensureFirebase();
+  const token = await getFcmToken();
   const d = desiredSub();
   await relay('/subscribe', { token, ...d, prev: null });
-  settings.pushSub = d; settings.push = true; saveSettings();
+  settings.pushToken = token; settings.pushSub = d; settings.pushAt = Date.now(); settings.push = true; saveSettings();
+}
+/* 起動時: トークンの更新検知 / 許可が外れていないか / 購読の再同期（3日ごと） */
+async function refreshPush({ renew = false } = {}) {
+  if (!settings.push) return;
+  if (!pushConfigured() || !('Notification' in window) || Notification.permission !== 'granted') {
+    settings.push = false; settings.pushSub = null; saveSettings(); syncSettingsUI();
+    toast('通知の許可が無効になっていたため、プッシュ通知をオフにしました');
+    return;
+  }
+  await ensureFirebase();
+  if (renew) { try { await firebase.messaging().deleteToken(); } catch { /* noop */ } }
+  const token = await getFcmToken();
+  if (token !== settings.pushToken) { settings.pushToken = token; settings.pushSub = null; }
+  await syncPush(renew || !settings.pushSub);
+  syncSettingsUI();
 }
 async function disablePush() {
   try { if (settings.pushToken && CFG.relayUrl) await relay('/unsubscribe', { token: settings.pushToken, prev: settings.pushSub }); } catch { /* noop */ }
   settings.push = false; settings.pushSub = null; saveSettings();
 }
 
-const SWATCHES = [[38, 'エンバー'], [250, 'オーシャン'], [160, 'フォレスト'], [305, 'バイオレット'], [8, 'ローズ'], [95, 'アンバー']];
+const SWATCHES = [[48, 'NERVオレンジ'], [27, 'ネルフレッド'], [150, 'MAGIグリーン'], [215, 'シアン'], [305, '初号機パープル'], [95, 'イエロー']];
 function syncSettingsUI() {
   const chipSet = (sel, v) => $$(sel + ' .chip').forEach(c => c.setAttribute('aria-checked', String(String(c.dataset.v) === String(v))));
   $('#optNotify').checked = settings.notify && 'Notification' in window && Notification.permission === 'granted';
@@ -931,7 +1007,7 @@ function syncSettingsUI() {
   $('#optShake').checked = settings.shake; $('#optFull').checked = settings.fullAlert;
   $('#optPush').checked = settings.push; $('#optPush').disabled = !pushConfigured();
   $('#btnTest').disabled = !settings.push;
-  $('#pushNote').textContent = pushConfigured() ? 'アプリを閉じていても即時に受信（FCM）' : 'config.js の Firebase / relay 設定後に有効化できます';
+  $('#pushNote').textContent = !pushConfigured() ? 'config.js の Firebase / relay 設定後に有効化できます' : ('Notification' in window && Notification.permission === 'denied') ? '通知がブロックされています（iPadの 設定 › 通知 で許可してください）' : 'アプリを閉じていても即時に受信（FCM）。津波・緊急地震速報は常に届きます';
   $('#permNote').textContent = !('Notification' in window) ? 'この環境は通知に未対応です' : Notification.permission === 'denied' ? 'ブラウザ設定で通知がブロックされています' : '新着時にこの端末へ通知します';
   $('#optNation').checked = settings.nation; $('#nationBox').style.display = settings.nation ? '' : 'none'; chipSet('#minScale', settings.minScale);
   $('#optRegion').checked = settings.region.on; $('#regionBox').style.display = settings.region.on ? '' : 'none';
@@ -959,6 +1035,10 @@ function onFilterChanged(needOlder) {
   if (needOlder && cutoff) ensureLoadedUntil(cutoff, 15).then(() => { renderList(); renderMarkers(); });
 }
 
+function renderLegend() {
+  const el = $('#legend'); if (!el) return;
+  el.innerHTML = [10, 20, 30, 40, 45, 50, 55, 60, 70].map(v => { const s = scaleInfo(v); return `<span class="lg"><i style="--c:${s.bg}"></i>${s.plain}</span>`; }).join('');
+}
 function initSettingsUI() {
   const dlg = $('#settings');
   $('#regionPref').innerHTML = '<option value="0">都道府県を選択</option>' + G.PREFS.map(p => `<option value="${p[0]}">${p[1]}</option>`).join('');
@@ -988,7 +1068,7 @@ function initSettingsUI() {
   $('#optFull').onchange = e => { settings.fullAlert = e.target.checked; saveSettings(); if (settings.fullAlert) showOverlay({ tone: 'eq', kind: 'テスト表示', title: '全画面警報の表示テストです', sub: '実際の警報時は、このように画面いっぱいに表示されます', badge: scaleInfo(55) }); };
   $('#optShake').onchange = e => { settings.shake = e.target.checked; saveSettings(); if (settings.shake) initShake(); else shakeSweep(); };
   $('#optPush').onchange = async (e) => {
-    e.target.disabled = true; if (e.target.checked) toast('プッシュ通知を登録中…（最大20秒）');
+    e.target.disabled = true; if (e.target.checked) toast('プッシュ通知を登録中…（中継サーバー起動待ちで最大1分）');
     try { e.target.checked ? await enablePush() : await disablePush(); toast(e.target.checked ? 'プッシュ通知を有効にしました' : 'プッシュ通知を無効にしました'); }
     catch (err) { e.target.checked = false; settings.push = false; saveSettings(); toast(err.message || 'プッシュ通知を有効にできません'); }
     syncSettingsUI();
@@ -1022,11 +1102,225 @@ async function openStats() {
   if (dlg.open) draw();
 }
 
+/* =========================================================
+   リアルタイム監視モニタ（P2P 地震感知情報 561 + 地震情報 + 緊急地震速報）
+   ========================================================= */
+const mon = { det: [], feed: [], count: 0, lastMsg: 0, open: false, raf: 0, lastDom: 0, areaLoading: false, latest: null };
+const MON_KEEP = 10 * 60e3;
+const MON = { LAT0: 24, LAT1: 46, LON0: 122, LON1: 146.5, KX: Math.cos(35 * Math.PI / 180) };
+const heatColor = (n) => (n >= 20 ? '#ff4538' : n >= 10 ? '#ff9f2e' : n >= 5 ? '#ffe14d' : n >= 2 ? '#4fd1a0' : '#6db3f2');
+const ensureAreas = () => {
+  if (areaTable || mon.areaLoading) return; mon.areaLoading = true;
+  G.loadAreas().then(t => { areaTable = t; }).catch(() => {}).finally(() => { mon.areaLoading = false; });
+};
+function monDetect(m) {                         // 設定に関係なく記録（モニタ用）
+  if (typeof m.area !== 'number') return;
+  const now = Date.now(); mon.det.push({ t: now, area: m.area });
+  if (mon.det.length > 6000 || now - mon.det[0].t > MON_KEEP) { const lim = now - MON_KEEP; mon.det = mon.det.filter(x => x.t >= lim).slice(-6000); }
+}
+function monFeed(m) {
+  let text = null, lv = '';
+  if (m.code === 551) {
+    const e = m.earthquake || {}, h = e.hypocenter || {};
+    const sc = Number.isFinite(e.maxScale) && e.maxScale >= 10 ? scaleInfo(e.maxScale).plain : '不明';
+    text = `地震情報 最大震度${sc} ${h.name || '震源調査中'}${h.magnitude > 0 ? ' M' + Number(h.magnitude).toFixed(1) : ''}`;
+    lv = e.maxScale >= 45 ? 'bad' : e.maxScale >= 30 ? 'warn' : '';
+  } else if (m.code === 552) {
+    const off = m.cancelled || !(m.areas && m.areas.length);
+    text = off ? '津波予報 解除' : `津波予報 ${m.areas.length}区域に発表`; lv = off ? '' : 'bad';
+  } else if (m.code === 556) {
+    if (m.test) return;
+    const h = (m.earthquake && m.earthquake.hypocenter) || {};
+    text = m.cancelled ? '緊急地震速報 取り消し' : `緊急地震速報（警報） ${h.name || ''}`.trim(); lv = m.cancelled ? '' : 'bad';
+  }
+  if (!text) return;
+  mon.feed.unshift({ t: Date.now(), text, lv }); if (mon.feed.length > 30) mon.feed.length = 30;
+}
+function openMonitor() {
+  const d = $('#monitor'); if (d.open) return;
+  ensureAreas(); d.showModal(); mon.open = true; mon.lastDom = 0; monLoop();
+}
+function monLoop() {
+  if (!mon.open) return;
+  const now = Date.now();
+  if (now - mon.lastDom > 500) { mon.lastDom = now; monDom(now); }
+  monDraw(now);
+  mon.raf = requestAnimationFrame(monLoop);
+}
+function monSize(cv, hFixed) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = hFixed || cv.clientHeight;
+  if (!w || !h) return null;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+  return { c, w, h };
+}
+function monDraw(now) {
+  const sz = monSize($('#monCanvas')); if (!sz) return;
+  const { c, w, h } = sz;
+  const sx = (MON.LON1 - MON.LON0) * MON.KX, sy = MON.LAT1 - MON.LAT0, s = Math.min(w / sx, h / sy) * 0.97;
+  const ox = (w - sx * s) / 2, oy = (h - sy * s) / 2;
+  const P = (lat, lon) => [ox + (lon - MON.LON0) * MON.KX * s, oy + (MON.LAT1 - lat) * s];
+  // 格子
+  c.lineWidth = 1; c.strokeStyle = 'rgba(255,138,31,.10)'; c.beginPath();
+  for (let la = MON.LAT0; la <= MON.LAT1; la += 2) { const y = Math.round(oy + (MON.LAT1 - la) * s) + .5; c.moveTo(ox, y); c.lineTo(ox + sx * s, y); }
+  for (let lo = MON.LON0; lo <= MON.LON1; lo += 2) { const x = Math.round(ox + (lo - MON.LON0) * MON.KX * s) + .5; c.moveTo(x, oy); c.lineTo(x, oy + sy * s); }
+  c.stroke();
+  c.font = '600 12px "Roboto Flex","Noto Sans JP",sans-serif'; c.textBaseline = 'middle';
+  if (!areaTable) { c.fillStyle = 'rgba(200,200,210,.6)'; c.textAlign = 'center'; c.fillText('地域データを読み込み中…', w / 2, h / 2); c.textAlign = 'left'; }
+  else { c.fillStyle = 'rgba(170,185,200,.34)'; areaTable.forEach(a => { const [x, y] = P(a.lat, a.lon); c.fillRect(x - 1, y - 1, 2.2, 2.2); }); }
+
+  // 揺れの感知（直近60秒の件数を色と大きさで表現）
+  if (areaTable) {
+    const cnt = new Map(), lim = now - 60000;
+    for (let i = mon.det.length - 1; i >= 0; i--) { const d = mon.det[i]; if (d.t < lim) break; cnt.set(d.area, (cnt.get(d.area) || 0) + 1); }
+    cnt.forEach((n, area) => {
+      const a = areaTable.get(area); if (!a) return; const [x, y] = P(a.lat, a.lon);
+      c.fillStyle = heatColor(n); c.globalAlpha = .88; c.beginPath(); c.arc(x, y, 3 + Math.min(11, Math.sqrt(n) * 2.2), 0, 6.283); c.fill();
+    });
+    c.globalAlpha = 1; c.lineWidth = 1.5;
+    for (let i = mon.det.length - 1; i >= 0; i--) {      // 新着のさざ波
+      const d = mon.det[i], age = now - d.t; if (age > 3000) break;
+      const a = areaTable.get(d.area); if (!a) continue; const [x, y] = P(a.lat, a.lon), k = age / 3000;
+      c.strokeStyle = `rgba(255,205,130,${(1 - k) * .85})`; c.beginPath(); c.arc(x, y, 5 + k * 28, 0, 6.283); c.stroke();
+    }
+  }
+  const cross = (x, y, r, col, lw) => { c.strokeStyle = col; c.lineWidth = lw; c.beginPath(); c.moveTo(x - r, y - r); c.lineTo(x + r, y + r); c.moveTo(x + r, y - r); c.lineTo(x - r, y + r); c.stroke(); };
+  const label = (txt, x, y, col) => { c.fillStyle = 'rgba(0,0,0,.65)'; const tw = c.measureText(txt).width; c.fillRect(x - 3, y - 9, tw + 6, 18); c.fillStyle = col; c.fillText(txt, x, y); };
+
+  // 現在地
+  if (settings.home) { const [x, y] = P(settings.home.lat, settings.home.lon); c.fillStyle = '#6cc4ff'; c.beginPath(); c.arc(x, y, 5, 0, 6.283); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke(); label('現在地', x + 9, y, '#bfe6ff'); }
+  // 直近の地震（24時間以内）
+  const q = mon.latest;
+  if (q && q.lat != null && now - q.t < 864e5) {
+    const [x, y] = P(q.lat, q.lon), si = scaleInfo(q.scale), fresh = now - q.t < 600e3;
+    if (fresh) { const k = (now % 2000) / 2000; c.strokeStyle = si.bg; c.globalAlpha = 1 - k; c.lineWidth = 2; c.beginPath(); c.arc(x, y, 8 + k * 30, 0, 6.283); c.stroke(); c.globalAlpha = 1; }
+    cross(x, y, 8, '#000', 6); cross(x, y, 8, si.bg, 3.2);
+    label(`${q.name || '震源'} ${q.mag >= 0 ? 'M' + q.mag.toFixed(1) : ''}`.trim(), x + 13, y - 14, '#fff');
+  }
+  // 緊急地震速報: P波 / S波の同心円（概算）
+  if (state.eew) {
+    const m = state.eew.msg, hy = (m.earthquake && m.earthquake.hypocenter) || {}, lat = Number(hy.latitude), lon = Number(hy.longitude);
+    if (validCoord(lat, lon)) {
+      let o = parseJst(m.earthquake.originTime); if (!Number.isFinite(o)) o = parseJst(m.issue && m.issue.time); if (!Number.isFinite(o)) o = now;
+      const t = Math.max(0, (now - o) / 1000), dep = hy.depth > 0 ? hy.depth : 10, [x, y] = P(lat, lon);
+      [[VP, 'rgba(80,200,255,.85)', null], [VS, 'rgba(255,69,56,.95)', 'rgba(255,69,56,.14)']].forEach(([v, stroke, fill]) => {
+        const rk = Math.sqrt(Math.max(0, (v * t) ** 2 - dep * dep)), rp = rk / 111.2 * s; if (rp < 1) return;
+        c.beginPath(); c.arc(x, y, rp, 0, 6.283); if (fill) { c.fillStyle = fill; c.fill(); } c.strokeStyle = stroke; c.lineWidth = 2; c.stroke();
+      });
+      cross(x, y, 10, '#000', 7); cross(x, y, 10, (now % 600 < 300) ? '#ff4538' : '#ffc400', 4);
+      label(`${state.eew.msg.drill ? '【訓練】' : ''}緊急地震速報 ${hy.name || ''}`, x + 15, y - 16, '#ffb3ab');
+    }
+  }
+}
+function monDom(now) {
+  const set = (id, v) => { const el = $(id); if (el && el.textContent !== v) el.textContent = v; };
+  const pill = (id, cls, text) => { const el = $(id); if (!el) return; el.className = 'pill pill--' + cls; if (el.textContent !== text) el.textContent = text; };
+  set('#monClock', new Date(now).toLocaleTimeString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' }));
+  // 感知の集計
+  const lim = now - MON_KEEP, bins = new Array(60).fill(0); let n60 = 0, n10 = 0; const byPref = new Map();
+  for (const d of mon.det) {
+    if (d.t < lim) continue;
+    bins[Math.min(59, Math.floor((d.t - lim) / 10000))]++;
+    if (now - d.t < 60000) { n60++; const a = areaTable && areaTable.get(d.area); if (a) byPref.set(a.pref, (byPref.get(a.pref) || 0) + 1); }
+    if (now - d.t < 10000) n10++;
+  }
+  const surge = n60 >= 10;
+  set('#monN60', String(n60)); set('#monN10', String(n10));
+  const top = [...byPref.entries()].sort((a, b) => b[1] - a[1])[0];
+  set('#monTop', top ? top[0] : '—'); set('#monTopN', top ? `${top[1]}件/分` : '');
+  $('#monN60').closest('.tile').classList.toggle('tile--hot', surge);
+  pill('#monSurge', surge ? 'bad' : n60 ? 'warn' : 'ok', surge ? '感知が急増' : n60 ? '感知あり' : '平常');
+  // 状態
+  const live = state.status === 'live';
+  pill('#monLink', live ? 'ok' : state.status === 'offline' ? 'bad' : 'warn', live ? 'ライブ' : state.status === 'offline' ? 'オフライン' : '接続中');
+  const rcv = mon.lastMsg ? Math.round((now - mon.lastMsg) / 1000) : null;
+  set('#monLast', rcv == null ? '—' : rcv < 90 ? `${rcv}秒前` : `${Math.round(rcv / 60)}分前`);
+  set('#monCount', `${mon.count}件`);
+  pill('#monEew', state.eew ? 'bad' : 'ok', state.eew ? (state.eew.msg.drill ? '訓練中' : '発表中') : '発表なし');
+  const ts = state.tsunami, tsOn = ts && !ts.cancelled && ts.areas && ts.areas.length && Date.now() - (parseJst(ts.time) || 0) < DAY;
+  pill('#monTsu', tsOn ? 'bad' : 'ok', tsOn ? `${ts.areas.length}区域に発表` : '発表なし');
+  // 直近の地震
+  const evs = state.events.slice().sort((a, b) => b.t - a.t); mon.latest = evs.find(e => e.lat != null) || null;
+  const lst = $('#monLatest');
+  const html = evs.slice(0, 3).map(e => { const si = scaleInfo(e.scale, e.type === 'Foreign'); return `<li><span class="badge" style="--c:${si.bg};--fg:${si.fg}">${si.t}</span><div><b>${esc(e.name || '震源調査中')}</b><small>${e.mag >= 0 ? 'M' + e.mag.toFixed(1) + ' ・ ' : ''}${esc(rel(e.t))}</small></div></li>`; }).join('');
+  if (lst.dataset.h !== html) { lst.dataset.h = html; lst.innerHTML = html || '<li class="empty">履歴を読み込み中…</li>'; }
+  const fd = $('#monFeed');
+  const fh = mon.feed.slice(0, 12).map(f => `<li class="${f.lv}"><time>${new Date(f.t).toLocaleTimeString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' })}</time><span>${esc(f.text)}</span></li>`).join('');
+  if (fd.dataset.h !== fh) { fd.dataset.h = fh; fd.innerHTML = fh || '<li class="empty">受信待ち（地震情報・津波・緊急地震速報が届くとここに流れます）</li>'; }
+  monSpark(bins);
+}
+function monSpark(bins) {
+  const sz = monSize($('#monSpark'), 88); if (!sz) return;
+  const { c, w, h } = sz, mx = Math.max(6, ...bins), bw = w / bins.length, base = h - 16;
+  c.strokeStyle = 'rgba(255,138,31,.25)'; c.lineWidth = 1; c.beginPath(); c.moveTo(0, base + .5); c.lineTo(w, base + .5); c.stroke();
+  bins.forEach((n, i) => { if (!n) return; const bh = Math.max(2, n / mx * (base - 4)); c.fillStyle = heatColor(n); c.fillRect(i * bw + 1, base - bh, Math.max(1, bw - 2), bh); });
+  c.fillStyle = 'rgba(200,200,210,.7)'; c.font = '10.5px "Roboto Flex","Noto Sans JP",sans-serif'; c.textBaseline = 'alphabetic';
+  c.textAlign = 'left'; c.fillText('10分前', 0, h - 3); c.textAlign = 'right'; c.fillText(`現在（10秒ごと・最大${mx}件）`, w, h - 3);
+}
+
+/* =========================================================
+   接続診断 / 防災訓練 / CSV
+   ========================================================= */
+async function runDiag() {
+  const out = $('#diagOut'); out.hidden = false; out.innerHTML = '<div class="d d--warn"><b>診断中</b><span>しばらくお待ちください…</span></div>';
+  const rows = [], add = (lv, k, v) => rows.push(`<div class="d d--${lv}"><b>${esc(k)}</b><span>${esc(v)}</span></div>`);
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  add(standalone ? 'ok' : 'warn', '起動方法', standalone ? 'ホーム画面アプリ（PWA）' : 'ブラウザで開いています。iPad のプッシュ通知はホーム画面に追加したアプリでのみ動作します');
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  add(perm === 'granted' ? 'ok' : 'bad', '通知の許可', { granted: '許可済み', denied: 'ブロック中（iPad の 設定 › 通知 › 本アプリ で許可）', default: '未選択（設定でプッシュ通知をオン）', unsupported: 'この環境は非対応' }[perm]);
+  try { const reg = await navigator.serviceWorker.getRegistration(); add(reg && reg.active ? 'ok' : 'bad', 'Service Worker', reg && reg.active ? '稼働中' : '未登録（再読み込みしてください）'); } catch { add('bad', 'Service Worker', '確認できません'); }
+  const reg = settings.push && settings.pushToken;
+  add(reg ? 'ok' : 'warn', 'プッシュ登録', reg ? `登録済み（トークン …${settings.pushToken.slice(-6)}）／最終同期 ${settings.pushAt ? rel(settings.pushAt) : '—'}` : '未登録');
+  if (CFG.relayUrl) {
+    const t0 = performance.now();
+    try {
+      const r = await withTimeout(fetch(CFG.relayUrl.replace(/\/$/, '') + '/healthz', { cache: 'no-store' }), 12000, 'timeout'), j = await r.json();
+      add(j.ws ? 'ok' : 'warn', '中継サーバー', `応答 ${Math.round(performance.now() - t0)}ms ／ P2P接続 ${j.ws ? '○' : '×'} ／ 稼働 ${Math.round((j.up || 0) / 60)}分`);
+    } catch { add('bad', '中継サーバー', '応答なし。無料プランのスリープ中なら 1 分ほど待って再実行してください'); }
+  } else add('warn', '中継サーバー', 'config.js の relayUrl が未設定です');
+  const t1 = performance.now();
+  try { const r = await withTimeout(fetch(`${CFG.apiBase}/history?codes=551&limit=1`, { cache: 'no-store' }), 10000, 'timeout'); add(r.ok ? 'ok' : 'bad', 'P2P地震情報 API', `HTTP ${r.status} ・ ${Math.round(performance.now() - t1)}ms`); } catch { add('bad', 'P2P地震情報 API', '到達できません'); }
+  add(state.status === 'live' ? 'ok' : 'warn', 'WebSocket', state.status === 'live' ? `ライブ ／ 最終受信 ${mon.lastMsg ? rel(mon.lastMsg) : '（起動後まだ受信なし）'}` : '未接続（再接続を試行中）');
+  const top = state.events.slice().sort((a, b) => b.t - a.t)[0];
+  add(top ? 'ok' : 'warn', '履歴データ', top ? `${state.events.length}件 ／ 最新 ${rel(top.t)}` : '未取得');
+  out.innerHTML = rows.join('');
+}
+const pad2 = (n) => String(n).padStart(2, '0');
+const fmtJst = (ms) => { const d = new Date(ms + 9 * 3600e3); return `${d.getUTCFullYear()}/${pad2(d.getUTCMonth() + 1)}/${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`; };
+function startDrill() {
+  $$('dialog[open]').forEach(d => d.close());
+  const b = settings.home || { lat: 35.68, lon: 139.69, prefName: '東京都' };
+  const now = Date.now(), id = 'drill-' + now;
+  applyEew({
+    code: 556, id, drill: true, issue: { eventId: id, time: fmtJst(now) },
+    earthquake: { originTime: fmtJst(now - 1500), hypocenter: { name: '訓練用の想定震源', latitude: b.lat + 0.55, longitude: b.lon + 0.45, depth: 30, magnitude: 7.0 } },
+    areas: [{ pref: b.prefName || '', name: b.prefName || 'あなたの地域', scaleFrom: 50, scaleTo: 60 }]
+  });
+  toast('防災訓練を開始しました（実際の警報ではありません）');
+}
+function exportCsv() {
+  const rows = [['発生時刻', '震源', '最大震度', 'M', '深さ(km)', '緯度', '経度', '津波', '種別', '情報源', 'コメント']];
+  state.events.slice().sort((a, b) => b.t - a.t).forEach(e => rows.push([fmtJst(e.t), e.name, e.scale >= 10 ? scaleInfo(e.scale).plain : '不明', e.mag >= 0 ? e.mag.toFixed(1) : '', e.depth >= 0 ? e.depth : '', e.lat ?? '', e.lon ?? '', e.tsu, e.type, e.src, e.cm]));
+  const csv = '\uFEFF' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const name = `地震履歴_${fmtJst(Date.now()).slice(0, 10).replace(/\//g, '')}.csv`, file = new File([csv], name, { type: 'text/csv' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: name }).catch(() => {}); return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  toast(`${rows.length - 1}件の履歴を書き出しました`);
+}
+
 /* ---------------- 起動 ---------------- */
 function init() {
   applyTheme();
   initMap();
   initSettingsUI();
+  renderLegend();
+  $('#btnMon').addEventListener('click', openMonitor);
+  $('#monClose').addEventListener('click', () => $('#monitor').close());
+  $('#monitor').addEventListener('close', () => { mon.open = false; cancelAnimationFrame(mon.raf); });
+  $('#btnDiag').addEventListener('click', runDiag);
+  $('#btnDrill').addEventListener('click', startDrill);
+  $('#btnCsv').addEventListener('click', exportCsv);
   syncFilterUI();
 
   // 一覧・絞り込み
@@ -1083,6 +1377,7 @@ function init() {
   fetchHistory(true).finally(connect);
   if (settings.kiosk) setKiosk(true, { quiet: true });
   wakeLock(); initShake();
+  if (settings.push) setTimeout(() => refreshPush().catch(e => console.warn('[push]', e && e.message)), 2500);
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
