@@ -1,5 +1,5 @@
 /* Service Worker: オフラインキャッシュ + FCM バックグラウンド通知 */
-const VER = 'v2.1.1';
+const VER = 'v2.1.2';
 const SHELL = `shell-${VER}`, TILES = 'tiles-v1', LIBS = 'libs-v1';
 const SHELL_FILES = ['./', './index.html', './css/app.css', './js/app.js', './js/geo.js', './js/stats.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
@@ -63,10 +63,10 @@ async function swr(req, cacheName, opts = {}) {
 async function nf(req, cacheName, opts = {}) {
   const cache = await caches.open(cacheName);
   try {
-    const r = await Promise.race([fetch(new Request(req, { cache: 'no-cache' })), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4500))]);
+    const r = await Promise.race([fetch(new Request(req, { cache: 'no-cache' })), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3500))]);
     if (r && r.ok) cache.put(req, r.clone());
     return r;
-  } catch { return (await cache.match(req, opts)) || Response.error(); }
+  } catch { return (await cache.match(req, opts)) || fetch(req).catch(() => Response.error()); }   // キャッシュも無ければ通常の取得を待つ
 }
 async function tile(req) {
   const cache = await caches.open(TILES);
