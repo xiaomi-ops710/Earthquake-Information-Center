@@ -6,8 +6,9 @@
  *  - POST /test        { token }   自分の端末へテスト通知
  *  - GET  /healthz
  *
- * トピック設計（端末ごとに最大3つ）
+ * トピック設計（端末ごとに最大4つ）
  *   quake-alert            全端末 … 津波・緊急地震速報（地域別だけの端末にも必ず届く）
+ *   quake-volcano          噴火速報・噴火警報（設定でオンにした端末）
  *   quake-min-{10..55}     全国の最小震度
  *   quake-pref-{1..47}-{t} 都道府県別の最小震度
  *
@@ -20,7 +21,10 @@
 import http from 'node:http';
 import WebSocket from 'ws';
 import admin from 'firebase-admin';
-import { THRESHOLDS, TOPIC_ALERT, topicNation, normalizeSub, topicsOf, QuakeTracker, AlertTracker, parseJst } from './logic.js';
+import { THRESHOLDS, TOPIC_ALERT, TOPIC_VOLCANO, topicNation, normalizeSub, topicsOf, QuakeTracker, AlertTracker, parseJst } from './logic.js';
+import { VOLCANO_FEED, parseAtom, VolcanoTracker } from './volcano.js';
+
+const SERVER_VERSION = 3;
 
 const WS_URL = process.env.P2P_WS_URL || 'wss://api.p2pquake.net/v2/ws';
 const API_BASE = process.env.P2P_API || 'https://api.p2pquake.net/v2';
@@ -37,6 +41,7 @@ process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e 
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e && e.message || e));
 
 /* ---------- 送信 ---------- */
+let lastPush = null, lastWsMsg = 0;
 async function send(n) {
   const data = {
     mid: n.mid, kind: n.kind, title: n.title, body: n.body, tag: n.tag,
@@ -49,15 +54,17 @@ async function send(n) {
       android: { priority: 'high', ttl: n.ttl * 1000 },
       apns: { headers: { 'apns-priority': '10' } }
     });
+    lastPush = { t: Date.now(), topic: n.topic, title: n.title };
     console.log(`[fcm] ${n.topic}${n.renotify ? '' : ' (silent-update)'} ${n.title} / ${n.body.replace(/\n/g, ' ')}`);
   } catch (err) { console.error('[fcm] send failed', n.topic, err.message); }
 }
 
 const quakes = new QuakeTracker(), alerts = new AlertTracker();
 const sent = new Set();                                   // 重複処理防止（WS と REST 補完の両方から来るため）
-function dispatch(m) {
+function dispatch(m, late = false) {
   if (!m || typeof m !== 'object') return;
   const key = m.id != null ? `${m.code}:${m.id}` : null;
+  if (m.code === 551 || m.code === 552 || m.code === 556) console.log(`[p2p] code=${m.code} id=${m.id}${m.earthquake ? ' maxScale=' + m.earthquake.maxScale : ''}`);   // Render のログで「受信できているか」を確認できる
   if (key) { if (sent.has(key)) return; sent.add(key); if (sent.size > 500) sent.delete(sent.values().next().value); }
   let list = [];
   try {
@@ -65,11 +72,11 @@ function dispatch(m) {
     else if (m.code === 552) list = alerts.tsunami(m);
     else if (m.code === 556) list = alerts.eewAlert(m);
   } catch (e) { console.error('[dispatch]', e.message); }
-  list.forEach(n => send(n));
+  list.forEach(n => send(late && n.kind !== 'test' ? { ...n, body: n.body + '\n（受信が遅れました）' } : n));
 }
 
 /* ---------- 切断中の取りこぼしを REST で補完（再接続時のみ。起動直後は再送を避けるため行わない） ---------- */
-async function catchUp() {
+async function catchUp(maxAge = 5 * 60e3) {
   try {
     const r = await fetch(`${API_BASE}/history?codes=551&codes=552&codes=556&limit=20`, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) throw new Error(r.status);
@@ -77,8 +84,8 @@ async function catchUp() {
     let n = 0;
     for (const m of arr) {
       const age = Date.now() - parseJst(m.time);
-      if (!(age >= 0) || age > (m.code === 556 ? 60e3 : 5 * 60e3)) continue;
-      n++; dispatch(m);
+      if (!(age >= 0) || age > (m.code === 556 ? 60e3 : maxAge)) continue;
+      n++; dispatch(m, age > 120e3);
     }
     console.log(`[catchup] checked ${n} recent messages`);
   } catch (e) { console.error('[catchup] failed', e.message); }
@@ -95,11 +102,12 @@ function connect() {
   }, 30e3);
   ws.on('open', () => {
     retry = 0; alive = Date.now(); console.log('[ws] connected');
-    if (everConnected) catchUp(); everConnected = true;
+    // 再接続時は5分、起動直後（スリープ復帰・再デプロイ）は8分前までの取りこぼしを補完。起動直後の再送は端末側で同じ tag に置換される
+    catchUp(everConnected ? 5 * 60e3 : 8 * 60e3); everConnected = true;
   });
   ws.on('message', (raw) => {
-    alive = Date.now();
-    try { const d = JSON.parse(raw.toString()); (Array.isArray(d) ? d : [d]).forEach(dispatch); }
+    alive = Date.now(); lastWsMsg = alive;
+    try { const d = JSON.parse(raw.toString()); (Array.isArray(d) ? d : [d]).forEach(m => dispatch(m)); }
     catch (e) { console.error('[ws] parse', e.message); }
   });
   ws.on('pong', () => { alive = Date.now(); });
@@ -113,6 +121,25 @@ function connect() {
   });
 }
 connect();
+
+/* ---------- 噴火情報（気象庁フィード）の定期取得 ---------- */
+const volcano = new VolcanoTracker();
+let volcanoState = { updated: 0, error: null, items: [] }, feedValidators = {};
+async function pollVolcano() {
+  try {
+    const headers = { 'user-agent': 'quake-pwa-relay/3 (+https://github.com)' };
+    if (feedValidators.etag) headers['if-none-match'] = feedValidators.etag;
+    if (feedValidators.lm) headers['if-modified-since'] = feedValidators.lm;
+    const r = await fetch(VOLCANO_FEED, { headers, signal: AbortSignal.timeout(15000) });
+    if (r.status === 304) { volcanoState = { ...volcanoState, updated: Date.now(), error: null }; return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    feedValidators = { etag: r.headers.get('etag') || '', lm: r.headers.get('last-modified') || '' };
+    const { items, pushes } = volcano.ingest(parseAtom(await r.text()));
+    volcanoState = { updated: Date.now(), error: null, items };
+    pushes.forEach(send);
+  } catch (e) { volcanoState = { ...volcanoState, error: e.message }; console.error('[volcano]', e.message); }
+}
+pollVolcano(); setInterval(pollVolcano, 60e3);
 
 /* ---------- スリープ防止（Render 無料プラン等） ---------- */
 const KEEPALIVE = (process.env.KEEPALIVE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
@@ -158,7 +185,13 @@ http.createServer(async (req, res) => {
   };
   const path = (req.url || '').split('?')[0];
   if (req.method === 'OPTIONS') return reply(204, {});
-  if (path === '/healthz' || path === '/') return reply(200, { ok: true, ws: everConnected, up: Math.round(process.uptime()) });
+  if (path === '/healthz' || path === '/') return reply(200, {
+    ok: true, v: SERVER_VERSION, ws: everConnected, up: Math.round(process.uptime()),
+    lastWsMsgAgo: lastWsMsg ? Math.round((Date.now() - lastWsMsg) / 1000) : null,
+    lastPush: lastPush ? { agoSec: Math.round((Date.now() - lastPush.t) / 1000), topic: lastPush.topic, title: lastPush.title } : null,
+    volcano: { ok: !volcanoState.error, items: volcanoState.items.length }
+  });
+  if (path === '/volcano') return reply(200, { ok: !volcanoState.error || volcanoState.items.length > 0, error: volcanoState.error, updated: volcanoState.updated, items: volcanoState.items });
   console.log(`[http] ${req.method} ${path} origin=${req.headers.origin || '-'}`);
   if (req.method !== 'POST') return reply(404, { error: 'not found' });
   if (limited(req, path === '/test' ? 'test' : 'sub', path === '/test' ? 6 : 40)) return reply(429, { error: 'too many requests' });
@@ -174,12 +207,25 @@ http.createServer(async (req, res) => {
       const had = body.prev ? topicsOf(normalizeSub(body.prev)) : THRESHOLDS.map(topicNation);
       await unsubscribeAll(token, had.filter(t => !want.includes(t) && t !== TOPIC_ALERT));
       await subscribeAll(token, want);
+      console.log('[sub]', want.join(','));
       return reply(200, { ok: true, topics: want });
     }
     if (path === '/unsubscribe') {
       const all = new Set([TOPIC_ALERT, ...THRESHOLDS.map(topicNation), ...(body.prev ? topicsOf(normalizeSub(body.prev)) : [])]);
       await unsubscribeAll(token, [...all]);
       return reply(200, { ok: true });
+    }
+    if (path === '/test-topic') {
+      // 実際の配信経路（トピック）の確認: 購読を確実にしてから、自分の全国トピック（無ければ地域→alert）へ送る
+      const next = normalizeSub(body), want = topicsOf(next);
+      await subscribeAll(token, want);
+      const via = next.nation != null ? topicNation(next.nation) : want.find(t => t.startsWith('quake-pref-')) || TOPIC_ALERT;
+      await messaging.send({
+        topic: via,
+        data: { mid: 'topic-test-' + Date.now(), kind: 'test', title: 'トピック配信テスト', body: `実際の配信経路（${via}）で届いています`, tag: 'test-topic', urgent: '0', renotify: '1' },
+        webpush: { headers: { Urgency: 'high', TTL: '60' } }
+      });
+      return reply(200, { ok: true, via, topics: want });
     }
     if (path === '/test') {
       await messaging.send({
