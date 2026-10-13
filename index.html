@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>地震・津波速報</title>
 <meta name="theme-color" content="#050506">
-<meta name="app-version" content="2.2.0">
+<meta name="app-version" content="2.4.1">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,7 +32,7 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
   <header class="appbar">
     <div class="appbar__lead">
       <svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><use href="#i-wave"/></svg>
-      <div class="appbar__title"><h1>地震速報</h1><span class="en">SEISMIC MONITOR</span></div>
+      <div class="appbar__title"><h1>地震速報</h1><span class="en">SEISMIC MONITOR<b id="hdrClock" class="hdrclock"></b></span></div>
     </div>
     <div class="appbar__trail">
       <span id="status" class="status" data-state="connecting" role="status">
@@ -55,10 +55,20 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
 
   <div id="legend" class="legend" aria-label="震度の凡例"></div>
 
+  <div id="ticker" class="ticker" role="marquee" aria-label="ステータス"></div>
+
   <div id="alerts" class="alerts" aria-live="assertive"></div>
 
   <main id="panes" class="panes" data-view="map">
-    <section id="listPane" class="pane pane--list" aria-label="地震履歴">
+    <section id="listPane" class="pane pane--list" data-tab="quake" aria-label="地震・津波・噴火の情報">
+      <div class="ltabs" role="tablist" aria-label="情報の種類">
+        <button class="ltab" role="tab" data-tab="home" aria-selected="false">ホーム<i class="ltab__dot" hidden></i></button>
+        <button class="ltab" role="tab" data-tab="quake" aria-selected="false">地震</button>
+        <button class="ltab" role="tab" data-tab="tsunami" aria-selected="false">津波<i class="ltab__dot" hidden></i></button>
+        <button class="ltab" role="tab" data-tab="volcano" aria-selected="false">噴火<i class="ltab__dot" hidden></i></button>
+        <button class="ltab" role="tab" data-tab="prep" aria-selected="false">備え</button>
+      </div>
+      <div id="ptr" class="ptr" hidden>↓ 引っ張って更新</div>
       <div class="list-head">
         <div class="list-title"><h2>発生履歴<span class="en">HISTORY</span></h2><span id="count" class="count"></span></div>
         <div class="search">
@@ -90,6 +100,10 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
         <p id="empty" class="empty" hidden>条件に合う地震情報がありません</p>
         <div id="more" class="more"></div>
       </div>
+      <div id="tpHome" class="scroll tpanel" role="tabpanel" hidden></div>
+      <div id="tpTsunami" class="scroll tpanel" role="tabpanel" hidden></div>
+      <div id="tpVolcano" class="scroll tpanel" role="tabpanel" hidden></div>
+      <div id="tpPrep" class="scroll tpanel" role="tabpanel" hidden></div>
     </section>
 
     <section id="mapPane" class="pane pane--map" aria-label="地図">
@@ -193,8 +207,16 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
       <label class="switch"><input type="checkbox" id="optPush"><span></span></label>
     </div>
     <div class="row">
+      <div class="row__text"><b>噴火速報・噴火警報の通知</b><small>気象庁が噴火速報・噴火警報を発表したときにプッシュ通知（津波・緊急地震速報と同様、地震のしきい値とは別）</small></div>
+      <label class="switch"><input type="checkbox" id="optVolcano"><span></span></label>
+    </div>
+    <div class="row">
       <div class="row__text"><b>テスト通知</b><small>プッシュが届くか確認（アプリを閉じて確認すると確実）</small></div>
       <button type="button" class="btn btn--text" id="btnTest">送信</button>
+    </div>
+    <div class="row">
+      <div class="row__text"><b>配信経路テスト</b><small>実際の地震通知と同じ経路（サーバー→トピック→この端末）で届くか確認。上のテスト通知が届くのに地震通知が来ないときはこちら</small></div>
+      <button type="button" class="btn btn--text" id="btnTestTopic">送信</button>
     </div>
 
     <div class="sec">診断・ツール</div>
@@ -221,6 +243,17 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
         <button type="button" class="btn btn--text btn--sm" id="btnHomeClear">解除</button>
       </div>
       <p class="hint">位置情報はこの端末の中だけに保存され、サーバーには送りません。地震の震源までの距離表示と、緊急地震速報のS波到達カウントダウン（推定）に使います。</p>
+    </div>
+
+    <div class="sec">見守り地点</div>
+    <div class="homebox">
+      <div id="placesList" class="places"></div>
+      <div class="btns">
+        <input id="placeName" class="field" maxlength="12" placeholder="名前（例: 実家）" aria-label="地点の名前">
+        <select id="placePref" class="field" aria-label="都道府県"></select>
+        <button type="button" class="btn btn--tonal btn--sm" id="btnPlaceAdd">追加</button>
+      </div>
+      <p class="hint">最大4件。ホーム画面に、各地点（都道府県）の直近24時間の揺れと、緊急地震速報の予想震度を表示します。プッシュ通知は「あなたの場所」と「地域別通知」の設定が対象です。</p>
     </div>
 
     <div class="sec">表示</div>
