@@ -39,6 +39,7 @@ const defaults = {
   notify: true, sound: true, speak: false, wake: false, shake: true,
   fullAlert: true, kiosk: false, kioskDim: false,
   nation: true, minScale: 30,
+  volcano: true, prep: {}, places: [], tab: 'home',
   region: { on: false, pref: 0, min: 30 },
   home: null,                                  // {lat, lon, pref(code), prefName, label, approx, at}
   filter: { scale: 'all', mag: 0, period: 'all', from: '', to: '', home: false },
@@ -293,7 +294,7 @@ function renderList() {
     const title = ev.name || (ev.type === 'ScalePrompt' ? '震度速報（震源調査中）' : '震源調査中');
     const meta = [ev.mag >= 0 ? `M${ev.mag.toFixed(1)}` : 'M不明', depthText(ev.depth, true)].map(esc).join(' · ');
     const isNew = state.newIds.has(ev.id);
-    return `<li><button class="item${isNew ? ' enter fresh' : ''}" data-id="${esc(ev.id)}" aria-pressed="${state.selected === ev.id}">
+    return `<li><button class="item${isNew ? ' enter fresh' : ''}" data-id="${esc(ev.id)}" aria-pressed="${state.selected === ev.id}" style="--sc:${si.bg}">
       <span class="badge${si.plain.length > 1 ? ' two' : ''}" style="--c:${si.bg};--fg:${si.fg}"><span>${si.t}</span></span>
       <span class="item__main"><span class="item__title">${esc(title)}</span>
         <span class="item__meta">${meta}${dist != null && dist < 3000 ? ` · <span class="km">約${Math.round(dist)}km</span>` : ''} ${tsuTag}${homeTag}</span></span>
@@ -303,6 +304,7 @@ function renderList() {
   sc.scrollTop = top;
   kioskRender();
   renderMore();
+  refreshInfoViews();
   if (state.newIds.size) setTimeout(() => { state.newIds.clear(); $$('.item.enter').forEach(i => i.classList.remove('enter')); }, 900);
   requestAnimationFrame(checkMore);
 }
@@ -362,7 +364,7 @@ function renderDetail(ev) {
     }).join('');
     return `<details class="pref"${i < 1 ? ' open' : ''}><summary><span class="badge" style="--c:${mx.bg};--fg:${mx.fg}">${mx.t}</span>${esc(name)}<small>${o.n}地点</small></summary><div class="body">${groups}</div></details>`;
   }).join('');
-  const dist = homeDist(ev), hs = homeScale(ev);
+  const dist = homeDist(ev), hs = homeScale(ev), sdist = scaleDist(ev);
   const you = settings.home && (dist != null || hs)
     ? `<div class="you"><b>あなたの場所</b>（${esc(homeName() || '現在地')}）${dist != null ? `： 震央から約<b>${Math.round(dist)}km</b>` : ''}${hs ? ` ／ 同じ都道府県の最大震度 <b>${esc(scaleInfo(hs).plain)}</b>` : ''}${dist != null && ev.mag >= 0 ? (dist <= impactKm(ev.mag) ? ' ／ 有感範囲の目安内' : ' ／ 有感範囲の目安外') : ''}</div>` : '';
   const d = $('#detail'); d.hidden = false;
@@ -380,6 +382,7 @@ function renderDetail(ev) {
     ${you}
     <div class="tsu-line ${tl[1] === 'warn' ? 'warn' : ''}">${esc(tl[0])}</div>
     ${ev.cm ? `<div class="cm">${esc(ev.cm)}</div>` : ''}
+    ${sdist}
     ${pHtml ? `<h4>各地の震度</h4>${pHtml}` : ''}
     <div class="meta">
       <div><span>情報の種類</span><span>${esc(TYPE_LABEL[ev.type] || ev.type)}</span></div>
@@ -419,6 +422,8 @@ function renderAlerts() {
     const mx = topScale ? scaleInfo(topScale) : null;
     const mag = h.magnitude > 0 ? Number(h.magnitude).toFixed(1) : '—';
     const dep = h.depth > 0 ? `${h.depth}<u>km</u>` : h.depth === 0 ? 'ごく浅い' : '—';
+    const fc = eewPrefForecast(m, homeName());
+    const fcTile = `<div class="eewfc${fc ? '' : ' eewfc--na'}"><small>現在地予想震度</small>${fc ? `<b>${esc(fc.txt)}</b><span>${esc(homeName())}</span>` : settings.home ? `<b>対象外</b><span>${esc(homeName())}は予報の対象地域に含まれていません</span>` : '<b>未設定</b><span>設定で現在地を登録</span>'}</div>`;
     html += `<div class="alert alert--eew" role="alert">
       <div class="alert__head"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg>
         <div><div class="alert__title">${m.drill ? '【訓練】' : ''}緊急地震速報<em>EMERGENCY EARTHQUAKE WARNING</em></div><div class="alert__sub">強い揺れに警戒してください</div></div>
@@ -429,7 +434,7 @@ function renderAlerts() {
         <div><small>深さ</small><b>${dep}</b></div>
         <div class="eewstat__max"><small>予想最大震度</small><b>${mx ? esc(mx.plain) : '—'}</b></div>
       </div>
-      ${settings.home ? '<div class="cd" id="eewCd"></div>' : '<div class="cd"><span class="lbl">「設定」で現在地を登録すると、S波到達までのカウントダウンを表示します</span></div>'}
+      <div class="eewmain">${fcTile}${settings.home ? '<div class="cd" id="eewCd"></div>' : '<div class="cd"><span class="lbl">「設定」で現在地を登録すると、S波到達までのカウントダウンを表示します</span></div>'}</div>
       ${areas.length ? `<details><summary>対象地域 ${areas.length}</summary><ul>${areas.slice(0, 40).map(a => `<li>${esc(a)}</li>`).join('')}</ul></details>` : ''}</div>`;
   }
   const ts = state.tsunami;
@@ -445,8 +450,15 @@ function renderAlerts() {
         return `<li>${esc(a.name)}<small>${gg.label}${eta ? ' ・ ' + eta : ''}${h ? ' ・ ' + esc(h) : ''}</small></li>`;
       }).join('')}</ul></details></div>`;
   }
+  volActive().filter(x => !vol.dismissed.has(x.id)).slice(0, 2).forEach(x => {
+    html += `<div class="alert alert--volc" role="alert"><div class="alert__head"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg>
+      <div><div class="alert__title">${esc(x.label)}${x.name ? '：' + esc(x.name) : ''}<em>VOLCANIC ${x.kind === 'flash' ? 'ERUPTION FLASH' : 'WARNING'}</em></div><div class="alert__sub">${esc((x.summary || x.title || '').slice(0, 110))}</div></div>
+      <button class="alert__close" data-close-vol="${esc(x.id)}" aria-label="閉じる"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button></div></div>`;
+  });
   box.innerHTML = html;
+  $$('[data-close-vol]', box).forEach(b => b.onclick = () => { vol.dismissed.add(b.dataset.closeVol); renderAlerts(); });
   $$('[data-close="eew"]', box).forEach(b => b.onclick = clearEew);
+  refreshInfoViews();
   const ka = $('#kAlerts'); if (ka) ka.innerHTML = html.replace(/ id="eewCd"/g, '');
   updateCd();
 }
@@ -496,7 +508,7 @@ function updateBadge() {
 const pushActive = () => !!(settings.push && settings.pushToken && pushConfigured());
 async function notify(title, body, tag, urgent) {
   if (!settings.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
-  if (!document.hidden) return;        // 画面を見ている間は、アプリ内の警報（音・フラッシュ・全画面）に任せる
+  if (!document.hidden && document.hasFocus()) return;   // 操作中の画面では、アプリ内の警報（音・フラッシュ・全画面）に任せる（見えていても操作していなければ通知する）
   if (pushActive()) return;            // バックグラウンドは FCM が通知する（二重通知の防止）
   const opts = { body, tag, renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', requireInteraction: !!urgent, data: { url: './' } };
   try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) return reg.showNotification(title, opts); new Notification(title, opts); } catch { /* noop */ }
@@ -572,7 +584,7 @@ function applyTsunami(m, { live }) {
       speak(`${g.label}が発表されました。${m.areas.slice(0, 4).map(a => a.name).join('、')}。ただちに海岸から離れ、高い場所へ避難してください。`, true);
     }
   }
-  renderAlerts();
+  renderAlerts(); renderTsunamiPanel(); updateTabDots();
 }
 
 /* 緊急地震速報: S波到達カウントダウン（推定） */
@@ -618,7 +630,7 @@ function applyEew(m) {
   const h = (m.earthquake && m.earthquake.hypocenter) || {};
   if (isNew) {
     flash(true); beep(true);
-    showOverlay({ tone: 'eew', eew: true, kind: m.drill ? '【訓練】緊急地震速報（警報）' : '緊急地震速報（警報）', title: m.drill ? 'これは訓練です。強い揺れに警戒' : '強い揺れに警戒してください', sub: `${h.name || '震源調査中'}${h.magnitude > 0 ? ' M' + Number(h.magnitude).toFixed(1) : ''}` });
+    showOverlay({ tone: 'eew', eew: true, kind: m.drill ? '【訓練】緊急地震速報（警報）' : '緊急地震速報（警報）', title: m.drill ? 'これは訓練です。強い揺れに警戒' : '強い揺れに警戒してください', sub: `${h.name || '震源調査中'}${h.magnitude > 0 ? ' M' + Number(h.magnitude).toFixed(1) : ''}${(() => { const f = eewPrefForecast(m, homeName()); return f ? ` ／ ${homeName()} 予想震度 ${f.txt}` : ''; })()}` });
     if (!m.drill) notify('緊急地震速報（警報）', `${h.name || '震源調査中'} 強い揺れに警戒してください`, 'eew', true);
     speak(m.drill ? 'これは訓練です。緊急地震速報。強い揺れに警戒してください。' : '緊急地震速報。強い揺れに警戒してください。', true);
   }
@@ -934,6 +946,7 @@ async function relay(path, body) {
 }
 const desiredSub = () => ({
   nation: settings.nation ? settings.minScale : null,
+  volcano: !!settings.volcano,
   region: settings.region.on && settings.region.pref ? { pref: settings.region.pref, name: regionPrefName(), min: settings.region.min } : null
 });
 const sameSub = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -964,14 +977,23 @@ async function ensureFirebase() {
   bindForeground();
 }
 let fgBound = false;
-function bindForeground() {            // アプリ表示中にプッシュが届いた場合: WebSocket が死んでいるときだけアプリ内で知らせる
+/* FCM は「画面が見えているウィンドウ」が1つでもあると、通知を出さずにアプリ側へ渡す。
+   iPadOS のウィンドウ表示などで、見えていても操作していない場合は、ここで必ず通知を表示する。 */
+async function showFromPush(d) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const reg = await navigator.serviceWorker.getRegistration(); if (!reg) return;
+  const tag = d.tag || 'quake'; let renotify = d.renotify !== '0';
+  try { const cur = await reg.getNotifications({ tag }); if (d.mid && cur.some(n => n.data && n.data.mid === d.mid)) renotify = false; } catch { /* noop */ }
+  return reg.showNotification(d.title || '地震情報', { body: d.body || '', tag, renotify, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', requireInteraction: d.urgent === '1', timestamp: Date.now(), data: { url: './', mid: d.mid || '', kind: d.kind || '' } });
+}
+function bindForeground() {
   if (fgBound) return; fgBound = true;
   try {
     firebase.messaging().onMessage((p) => {
-      const d = p.data || {};
-      if (state.status === 'live') return;
-      flash(d.urgent === '1'); beep(d.urgent === '1');
-      toast(`${d.title || '地震情報'}：${String(d.body || '').split('\n')[0]}`);
+      const d = p.data || {}, focused = document.hasFocus();
+      if (focused && state.status === 'live') return;                 // 操作中かつ配信が生きている → アプリ内の警報表示が出ている
+      if (!focused) showFromPush(d).catch(() => {});                  // 見えているが操作していない → 通知を表示
+      else { flash(d.urgent === '1'); beep(d.urgent === '1'); toast(`${d.title || '地震情報'}：${String(d.body || '').split('\n')[0]}`); }
       fetchHistory(true);
     });
   } catch { /* noop */ }
@@ -1020,6 +1042,7 @@ function syncSettingsUI() {
   $('#optWake').checked = settings.wake; $('#optWake').disabled = !('wakeLock' in navigator);
   $('#optShake').checked = settings.shake; $('#optFull').checked = settings.fullAlert;
   $('#optPush').checked = settings.push; $('#optPush').disabled = !pushConfigured();
+  { const v = $('#optVolcano'); if (v) v.checked = !!settings.volcano; }
   $('#btnTest').disabled = !settings.push;
   $('#pushNote').textContent = !pushConfigured() ? 'config.js の Firebase / relay 設定後に有効化できます' : ('Notification' in window && Notification.permission === 'denied') ? '通知がブロックされています（iPadの 設定 › 通知 で許可してください）' : 'アプリを閉じていても即時に受信（FCM）。津波・緊急地震速報は常に届きます';
   $('#permNote').textContent = !('Notification' in window) ? 'この環境は通知に未対応です' : Notification.permission === 'denied' ? 'ブラウザ設定で通知がブロックされています' : '新着時にこの端末へ通知します';
@@ -1080,6 +1103,7 @@ function initSettingsUI() {
   $('#optSpeak').onchange = e => { settings.speak = e.target.checked; saveSettings(); if (settings.speak) speak('音声読み上げをオンにしました。', true); };
   $('#optWake').onchange = e => { settings.wake = e.target.checked; saveSettings(); if (settings.wake) wakeLock(); else wakeSentinel && wakeSentinel.release().catch(() => {}); };
   $('#optFull').onchange = e => { settings.fullAlert = e.target.checked; saveSettings(); if (settings.fullAlert) showOverlay({ tone: 'eq', kind: 'テスト表示', title: '全画面警報の表示テストです', sub: '実際の警報時は、このように画面いっぱいに表示されます', badge: scaleInfo(55) }); };
+  { const v = $('#optVolcano'); if (v) v.onchange = e => { settings.volcano = e.target.checked; saveSettings(); syncPushSoon(); toast(settings.volcano ? '噴火速報・噴火警報をプッシュ通知します' : '噴火のプッシュ通知をオフにしました'); }; }
   $('#optShake').onchange = e => { settings.shake = e.target.checked; saveSettings(); if (settings.shake) initShake(); else shakeSweep(); };
   $('#optPush').onchange = async (e) => {
     e.target.disabled = true; if (e.target.checked) toast('プッシュ通知を登録中…（中継サーバー起動待ちで最大1分）');
@@ -1285,12 +1309,21 @@ async function runDiag() {
   add(perm === 'granted' ? 'ok' : 'bad', '通知の許可', { granted: '許可済み', denied: 'ブロック中（iPad の 設定 › 通知 › 本アプリ で許可）', default: '未選択（設定でプッシュ通知をオン）', unsupported: 'この環境は非対応' }[perm]);
   try { const reg = await navigator.serviceWorker.getRegistration(); add(reg && reg.active ? 'ok' : 'bad', 'Service Worker', reg && reg.active ? '稼働中' : '未登録（再読み込みしてください）'); } catch { add('bad', 'Service Worker', '確認できません'); }
   const reg = settings.push && settings.pushToken;
+  { const SN = { 10: '震度1以上', 30: '震度3以上', 40: '震度4以上', 45: '震度5弱以上', 55: '震度6弱以上' }, ps = settings.pushSub, ds = desiredSub(), same = ps && JSON.stringify(ps) === JSON.stringify(ds);
+    if (reg) add(!ps ? 'bad' : same ? 'ok' : 'warn', '購読内容（サーバー登録済み）', ps ? `全国: ${ps.nation ? (SN[ps.nation] || ps.nation) : 'オフ'} ／ 地域別: ${ps.region ? ps.region.name + ' ' + (SN[ps.region.min] || '') : 'オフ'} ／ 噴火: ${ps.volcano ? 'オン' : 'オフ'} ／ 津波・緊急地震速報: 常に受信${same ? '' : '（現在の設定とずれています。設定を開き直すと再同期します）'}` : 'まだサーバーに登録できていません。設定でプッシュ通知をオフ→オンにしてください'); }
   add(reg ? 'ok' : 'warn', 'プッシュ登録', reg ? `登録済み（トークン …${settings.pushToken.slice(-6)}）／最終同期 ${settings.pushAt ? rel(settings.pushAt) : '—'}` : '未登録');
   if (CFG.relayUrl) {
     const t0 = performance.now();
     try {
       const r = await withTimeout(fetch(CFG.relayUrl.replace(/\/$/, '') + '/healthz', { cache: 'no-store' }), 12000, 'timeout'), j = await r.json();
-      add(j.ws ? 'ok' : 'warn', '中継サーバー', `応答 ${Math.round(performance.now() - t0)}ms ／ P2P接続 ${j.ws ? '○' : '×'} ／ 稼働 ${Math.round((j.up || 0) / 60)}分`);
+      const upMin = Math.round((j.up || 0) / 60);
+      add(j.v ? (j.ws ? 'ok' : 'warn') : 'bad', '中継サーバー', j.v ? `v${j.v} ／ 応答 ${Math.round(performance.now() - t0)}ms ／ P2P接続 ${j.ws ? '○' : '×'} ／ 稼働 ${upMin}分` : `古い版です（購読の形式が違うため、震度のしきい値・地域別・噴火通知が反映されません）。relay/ を最新版で再デプロイしてください`);
+      if (j.v) {
+        add(j.lastWsMsgAgo == null ? 'warn' : 'ok', '地震情報の受信（サーバー）', j.lastWsMsgAgo == null ? '起動後まだ受信なし（地震が無いだけの場合もあります）' : `最後に ${j.lastWsMsgAgo < 120 ? j.lastWsMsgAgo + '秒' : Math.round(j.lastWsMsgAgo / 60) + '分'}前`);
+        add(j.lastPush ? 'ok' : 'warn', '最後のプッシュ送信', j.lastPush ? `${j.lastPush.agoSec < 120 ? j.lastPush.agoSec + '秒' : Math.round(j.lastPush.agoSec / 60) + '分'}前 ・ ${j.lastPush.title}` : '起動後まだ送信なし');
+        if (upMin < 3) add('warn', 'スリープの疑い', 'サーバーが直前に起動し直されています。無料プランは15分アクセスが無いと停止し、その間の地震は通知されません。UptimeRobot 等で /healthz を5分ごとに監視してください');
+        add(j.volcano && j.volcano.ok ? 'ok' : 'warn', '噴火情報フィード', j.volcano && j.volcano.ok ? `取得中（${j.volcano.items}件）` : '取得できていません');
+      }
     } catch { add('bad', '中継サーバー', '応答なし。無料プランのスリープ中なら 1 分ほど待って再実行してください'); }
   } else add('warn', '中継サーバー', 'config.js の relayUrl が未設定です');
   const t1 = performance.now();
@@ -1303,6 +1336,12 @@ async function runDiag() {
 }
 const pad2 = (n) => String(n).padStart(2, '0');
 const fmtJst = (ms) => { const d = new Date(ms + 9 * 3600e3); return `${d.getUTCFullYear()}/${pad2(d.getUTCMonth() + 1)}/${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`; };
+async function testTopic() {
+  if (!settings.push || !settings.pushToken) { toast('先に「プッシュ通知（FCM）」をオンにしてください'); return; }
+  toast('配信経路テストを送信中…（実際の地震通知と同じトピック経由）');
+  try { const j = await relay('/test-topic', { token: settings.pushToken, ...desiredSub() }); toast(`送信しました（経路: ${j.via || 'トピック'}）。アプリを閉じて通知が届くか確認してください`); }
+  catch (e) { toast((e && e.message) || '配信経路テストに失敗しました'); }
+}
 function startDrill() {
   $$('dialog[open]').forEach(d => d.close());
   const b = settings.home || { lat: 35.68, lon: 139.69, prefName: '東京都' };
@@ -1325,6 +1364,340 @@ function exportCsv() {
   toast(`${rows.length - 1}件の履歴を書き出しました`);
 }
 
+/* =========================================================
+   情報タブ（地震 / 津波 / 噴火 / 備え）・引っ張って更新
+   ========================================================= */
+const fmtDT = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+const tsuTop = (areas) => areas.reduce((m, a) => ((GRADE[a.grade]?.rank || 0) > (GRADE[m]?.rank || 0) ? a.grade : m), 'Unknown');
+const etaText = (a) => (a.immediate ? 'ただちに来襲' : a.firstHeight && a.firstHeight.arrivalTime ? `第1波 ${String(a.firstHeight.arrivalTime).slice(-8, -3) || a.firstHeight.arrivalTime}` : (a.firstHeight && a.firstHeight.condition) || '');
+const tsuHist = { items: [], loading: false, at: 0 };
+const vol = { items: [], updated: 0, error: null, loading: false, primed: false, seen: new Set(load('eqm.volseen.v1', [])), dismissed: new Set() };
+const VOL_ALERT = (x) => (x.kind === 'flash' || x.kind === 'warning');
+let curTab = 'quake';
+
+function areaRows(areas) {
+  return [...areas].sort((a, b) => (GRADE[b.grade]?.rank || 0) - (GRADE[a.grade]?.rank || 0)).map(a => {
+    const g = GRADE[a.grade] || GRADE.Unknown, eta = etaText(a), h = a.maxHeight && a.maxHeight.description || '';
+    return `<li class="trow" data-rank="${g.rank}"><span class="gchip">${g.label.replace('津波', '')}</span><b>${esc(a.name)}</b><small>${[eta, h ? '予想 ' + esc(h) : ''].filter(Boolean).join(' ・ ') || '—'}</small></li>`;
+  }).join('');
+}
+function renderTsunamiPanel() {
+  const el = $('#tpTsunami'); if (!el) return;
+  const ts = state.tsunami, on = ts && !ts.cancelled && ts.areas && ts.areas.length;
+  let html = '';
+  if (on) {
+    const g = GRADE[tsuTop(ts.areas)] || GRADE.Unknown;
+    html += `<section class="tcard" data-rank="${g.rank}"><div class="tcard__head"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg><div><b>${g.label}が発表されています</b><small>${esc(fmtDT.format(parseJst(ts.time)))}発表 ・ ${ts.areas.length}地域</small></div></div>
+      <p class="tcard__act">ただちに海岸・河口から離れ、高い場所へ避難してください。津波は繰り返し来襲し、第1波が最大とは限りません。</p><ul class="trows">${areaRows(ts.areas)}</ul></section>`;
+  } else {
+    html += `<section class="tcard tcard--ok"><div class="tcard__head"><svg viewBox="0 0 24 24"><use href="#i-wave"/></svg><div><b>現在、津波に関する予報は発表されていません</b><small>${tsuHist.at ? esc(fmtHM.format(tsuHist.at)) + ' 確認' : 'リアルタイムで監視中'}</small></div></div></section>`;
+  }
+  const past = tsuHist.items.filter(m => !(on && ts.id === m.id)).slice(0, 12);
+  html += `<h3 class="tsec">過去の発表<span class="en">HISTORY</span></h3>`;
+  if (!past.length) html += `<p class="tempty">${tsuHist.loading ? '読み込み中…' : tsuHist.at ? '直近の津波予報の発表はありません' : '履歴を読み込めていません（下に引っ張って更新）'}</p>`;
+  else html += past.map(m => {
+    const off = m.cancelled || !(m.areas && m.areas.length), g = off ? null : (GRADE[tsuTop(m.areas)] || GRADE.Unknown);
+    return `<details class="thist"><summary><span class="gchip" data-rank="${g ? g.rank : 0}">${g ? g.label.replace('津波', '') : '解除'}</span><b>${off ? '津波予報の解除' : g.label}</b><small>${esc(fmtDT.format(parseJst(m.time)))}${off ? '' : ` ・ ${m.areas.length}地域`}</small></summary>${off ? '' : `<ul class="trows">${areaRows(m.areas)}</ul>`}</details>`;
+  }).join('');
+  html += `<p class="tfoot">出典: P2P地震情報（気象庁の津波予報）。避難は気象庁・自治体の最新情報に従ってください。</p>`;
+  el.innerHTML = html;
+}
+async function fetchTsunamiHistory() {
+  if (tsuHist.loading) return; tsuHist.loading = true; renderTsunamiPanel();
+  try {
+    const r = await fetch(`${CFG.apiBase}/history?codes=552&limit=20`, { cache: 'no-store' });
+    if (r.ok) { tsuHist.items = await r.json(); tsuHist.at = Date.now(); }
+  } catch { /* 通信エラーは空表示のまま */ }
+  tsuHist.loading = false; renderTsunamiPanel(); updateTabDots();
+}
+
+/* ---- 噴火（中継サーバー経由で気象庁フィードを取得） ---- */
+const VKIND = { flash: ['噴火速報', 'bad'], warning: ['噴火警報', 'bad'], obs: ['観測報', 'warn'], ash: ['降灰予報', 'warn'], info: ['解説情報', 'info'], forecast: ['噴火予報', 'dim'], other: ['火山情報', 'dim'] };
+function renderVolcanoPanel() {
+  const el = $('#tpVolcano'); if (!el) return;
+  let html = `<div class="vbar"><span>${vol.updated ? '更新 ' + esc(fmtHM.format(vol.updated)) : (vol.loading ? '取得中…' : '')}</span><a class="btn btn--text btn--sm" href="https://www.jma.go.jp/bosai/map.html#contents=volcano" target="_blank" rel="noopener">気象庁の火山情報 ↗</a></div>`;
+  if (!CFG.relayUrl) html += `<p class="tempty">噴火情報の表示には、config.js の relayUrl（中継サーバー）の設定が必要です。</p>`;
+  else if (!vol.items.length) html += `<p class="tempty">${vol.loading ? '中継サーバーから取得中…（無料プランでは起動に1分ほどかかることがあります）' : vol.error ? `噴火情報を取得できません（${esc(vol.error)}）。中継サーバーが古い版か停止中の可能性があります。設定の「接続診断」で確認できます。` : '直近の火山に関する情報はありません'}</p>`;
+  else {
+    html += vol.items.slice(0, 30).map(x => {
+      const [lab, cls] = VKIND[x.kind] || VKIND.other, t = Date.parse(x.updated);
+      return `<article class="vcard vcard--${cls}"><div class="vcard__top"><span class="vkind vkind--${cls}">${esc(lab)}</span><b>${esc(x.name || x.title)}</b><small>${Number.isFinite(t) ? esc(fmtDT.format(t)) + ' ・ ' + esc(rel(t)) : ''}</small></div>
+        ${x.summary ? `<p class="vcard__sum">${esc(x.summary)}</p>` : ''}${x.name && x.title ? `<small class="vcard__t">${esc(x.title)}${x.author ? ' ・ ' + esc(x.author) : ''}</small>` : ''}</article>`;
+    }).join('');
+    html += `<p class="tfoot">出典: 気象庁 防災情報XML。噴火警戒レベルや避難の判断は、気象庁・自治体の最新情報を必ず確認してください。</p>`;
+  }
+  el.innerHTML = html;
+}
+async function fetchVolcano() {
+  if (!CFG.relayUrl || vol.loading) { renderVolcanoPanel(); return; }
+  vol.loading = true; renderVolcanoPanel();
+  try {
+    const r = await withTimeout(fetch(CFG.relayUrl.replace(/\/$/, '') + '/volcano', { cache: 'no-store' }), 25000, 'タイムアウト');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    vol.items = Array.isArray(j.items) ? j.items : []; vol.updated = j.updated || Date.now(); vol.error = j.ok === false && !vol.items.length ? (j.error || 'フィード取得失敗') : null;
+    const fresh = vol.items.filter(x => VOL_ALERT(x) && !vol.seen.has(x.id));
+    if (vol.primed) fresh.forEach(alertVolcano);                       // 初回取得（過去分）では鳴らさない
+    vol.items.forEach(x => vol.seen.add(x.id)); vol.primed = true;
+    save('eqm.volseen.v1', [...vol.seen].slice(-200));
+  } catch (e) { vol.error = e && e.message || '通信エラー'; }
+  vol.loading = false; renderVolcanoPanel(); updateTabDots(); renderAlerts();
+}
+function alertVolcano(x) {
+  const title = `${x.label}${x.name ? '：' + x.name : ''}`;
+  flash(true); beep(true); toast(title);
+  notify(title, (x.summary || x.title || '').slice(0, 120), 'volcano', true);
+  speak(`${x.label}が発表されました。${x.name || ''}。`, true);
+}
+const volActive = () => vol.items.filter(x => VOL_ALERT(x) && Date.now() - Date.parse(x.updated) < 3 * 3600e3);
+
+/* ---- 備え（オフラインでも読める行動の目安 + 持ち出し品チェック） ---- */
+const PREP = [
+  { id: 'eq', title: '地震', sub: '揺れている間・揺れが収まったら', items: ['頭を守り、丈夫な机の下など安全な場所へ。揺れが収まるまで動かない', '無理に火を消しに行かない。揺れが収まってから落ち着いて火の始末をする', '揺れが収まったら、ドアや窓を開けて出口を確保。ガラスの破片に注意して足元を守る', 'エレベーターでは全階のボタンを押し、止まった階で降りる', '屋外ではブロック塀・自動販売機・ガラス窓・看板から離れる', '海岸や川の近くでは、揺れが弱くても津波に備えて高い場所へ'] },
+  { id: 'tsu', title: '津波', sub: '「揺れたら高台へ」警報を待たずに避難', items: ['強い揺れ、または弱くても長くゆっくりした揺れを感じたら、警報を待たずに高台・津波避難ビルへ', '海岸・河口付近から離れる。津波は川も遡る', '津波は繰り返し来襲し、第1波が最大とは限らない。警報・注意報が解除されるまで戻らない', '津波注意報でも海岸や海の中にいる人は、ただちに離れる', '車での避難は渋滞の恐れがある。地域の指示に従う'] },
+  { id: 'vol', title: '噴火', sub: '噴火警戒レベルと自治体の避難情報を確認', items: ['火口周辺に近づかない。登山中は、ただちに山小屋や避難施設へ退避し、頭を守る', '噴石・火砕流・融雪型火山泥流は命に関わる。避難の指示には早めに従う', '降灰時は屋内に入り、マスクやゴーグルで目・鼻・口を守る', '降灰時の運転は視界不良やスリップの恐れがあるため控える'] }
+];
+const KIT = ['飲料水（1人1日3Lを目安に、最低3日分）', '非常食（3日分以上）', 'スマホの充電器・モバイルバッテリー', '懐中電灯・予備の電池', '携帯ラジオ', '常備薬・お薬手帳', '現金（小銭を含む）', 'マスク・衛生用品', '簡易トイレ', '笛（ホイッスル）', '軍手・底の厚い靴', '連絡先メモ・貴重品のコピー'];
+function renderPrepPanel() {
+  const el = $('#tpPrep'); if (!el) return;
+  const done = settings.prep || {};
+  el.innerHTML = `<p class="tfoot" style="margin-top:0">一般的な目安です。お住まいの自治体の指示・ハザードマップを優先してください。</p>
+    ${PREP.map(s => `<details class="pcard" ${s.id === 'eq' ? 'open' : ''}><summary><b>${s.title}</b><small>${s.sub}</small></summary><ul class="plist">${s.items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>`).join('')}
+    <details class="pcard" open><summary><b>持ち出し品チェック</b><small>${KIT.filter((_, i) => done['k' + i]).length}/${KIT.length} 準備済み</small></summary><ul class="plist plist--chk">${KIT.map((t, i) => `<li><label><input type="checkbox" data-k="k${i}" ${done['k' + i] ? 'checked' : ''}><span>${esc(t)}</span></label></li>`).join('')}</ul></details>
+    <details class="pcard"><summary><b>連絡・確認</b><small>安否確認と避難場所</small></summary><ul class="plist"><li>災害用伝言ダイヤル <b>171</b>（体験利用日あり）。家族で連絡方法を決めておく</li><li>ハザードマップで自宅・職場・通学路の危険と避難場所を確認 <a href="https://disaportal.gsi.go.jp/" target="_blank" rel="noopener">ハザードマップポータル ↗</a></li></ul></details>`;
+  $$('input[data-k]', el).forEach(c => c.onchange = () => { settings.prep = { ...(settings.prep || {}), [c.dataset.k]: c.checked }; saveSettings(); const sm = c.closest('details').querySelector('summary small'); if (sm) sm.textContent = `${KIT.filter((_, i) => settings.prep['k' + i]).length}/${KIT.length} 準備済み`; });
+}
+
+function updateTabDots() {
+  const tsuOn = state.tsunami && !state.tsunami.cancelled && state.tsunami.areas && state.tsunami.areas.length;
+  const set = (tab, on) => { const d = $(`.ltab[data-tab="${tab}"] .ltab__dot`); if (d) d.hidden = !on; };
+  set('home', systemStatus().lv >= 3); set('tsunami', !!tsuOn); set('volcano', volActive().length > 0);
+}
+function setTab(name) {
+  curTab = name;
+  $$('.ltab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  const q = name === 'quake';
+  $('.list-head').hidden = !q; $('#scroll').hidden = !q;
+  $('#tpHome').hidden = name !== 'home'; $('#tpTsunami').hidden = name !== 'tsunami'; $('#tpVolcano').hidden = name !== 'volcano'; $('#tpPrep').hidden = name !== 'prep';
+  if (name === 'home') { renderHomePanel(); fetchEewLog(); }
+  if (name === 'tsunami') { renderTsunamiPanel(); fetchTsunamiHistory(); }
+  if (name === 'volcano') { renderVolcanoPanel(); fetchVolcano(); }
+  if (name === 'prep') renderPrepPanel();
+  $('#listPane').dataset.tab = name;
+  if (settings.tab !== name) { settings.tab = name; saveSettings(); }
+}
+
+/* 引っ張って更新（iPad / iPhone の PWA には標準のものが無いため自前で実装）。ヘッダー・各タブのどこから引っ張っても動く */
+function initPtr() {
+  const pane = $('#listPane'), ind = $('#ptr'); let y0 = null, dy = 0, busy = false;
+  const scroller = () => ({ home: $('#tpHome'), quake: $('#scroll'), tsunami: $('#tpTsunami'), volcano: $('#tpVolcano'), prep: $('#tpPrep') }[curTab]);
+  const refresh = () => (curTab === 'home' ? Promise.all([fetchHistory(true), fetchEewLog()]) : curTab === 'tsunami' ? Promise.all([fetchTsunamiHistory(), fetchHistory(true)]) : curTab === 'volcano' ? fetchVolcano() : fetchHistory(false));
+  const reset = () => { ind.hidden = true; ind.style.transform = 'translate(-50%, 0)'; ind.classList.remove('ready', 'spin'); y0 = null; dy = 0; };
+  pane.addEventListener('touchstart', (e) => { const sc = scroller(); if (sc && sc.scrollTop <= 0 && !busy && e.touches.length === 1 && !e.target.closest('input, select, textarea')) { y0 = e.touches[0].clientY; dy = 0; } }, { passive: true });
+  pane.addEventListener('touchmove', (e) => {
+    if (y0 == null) return;
+    const sc = scroller(); dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || (sc && sc.scrollTop > 0)) { if (dy <= 0) reset(); return; }
+    ind.hidden = false; ind.style.transform = `translate(-50%, ${Math.min(70, dy * .45)}px)`;
+    ind.classList.toggle('ready', dy > 90); ind.textContent = dy > 90 ? '離すと更新' : '↓ 引っ張って更新';
+  }, { passive: true });
+  const end = async () => {
+    if (y0 == null) return;
+    if (dy > 90 && !busy && curTab !== 'prep') {
+      busy = true; ind.classList.add('spin'); ind.textContent = '更新中…';
+      try { await refresh(); } catch { /* noop */ }
+      setTimeout(() => { busy = false; reset(); }, 350);
+    } else reset();
+  };
+  pane.addEventListener('touchend', end, { passive: true }); pane.addEventListener('touchcancel', reset, { passive: true });
+}
+function initTabs() {
+  if (!$('.ltabs')) return;                                           // HTML が古いときは何もしない
+  $$('.ltab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  initPtr();
+  setTab(['home', 'quake', 'tsunami', 'volcano', 'prep'].includes(settings.tab) ? settings.tab : 'home');
+  updateTabDots(); setTimeout(fetchVolcano, 3500);
+  setInterval(() => { if (!document.hidden && CFG.relayUrl) fetchVolcano(); }, 120e3);
+}
+function wakeRelay() { if (CFG.relayUrl) fetch(CFG.relayUrl.replace(/\/$/, '') + '/healthz', { mode: 'no-cors', cache: 'no-store' }).catch(() => {}); }   // スリープ中の中継サーバーを起こす
+
+/* =========================================================
+   ホーム / 現在地予想震度 / 見守り地点 / ティッカー
+   ========================================================= */
+const SCALE_NAME = { 10: '1', 20: '2', 30: '3', 40: '4', 45: '5弱', 50: '5強', 55: '6弱', 60: '6強', 70: '7' };
+const prefMatch = (a, pref) => a.pref === pref || (!a.pref && String(a.name || '').startsWith(pref.replace(/[都道府県]$/, '')));
+
+/** 緊急地震速報の都道府県単位の予想震度 → { to, from, txt } | null（その都道府県が対象地域に含まれないとき null） */
+function eewPrefForecast(msg, prefName) {
+  if (!msg || !prefName) return null;
+  const areas = (msg.areas || []).filter(a => prefMatch(a, prefName));
+  if (!areas.length) return null;
+  let from = 0, to = 0, over = false;
+  areas.forEach(a => {
+    const f = SCALE_NAME[a.scaleFrom] ? a.scaleFrom : 0, t = SCALE_NAME[a.scaleTo] ? a.scaleTo : 0;
+    if (a.scaleTo === 99) over = true;
+    from = Math.max(from, f || t); to = Math.max(to, t || f);
+  });
+  if (!to && !from) return { to: 0, from: 0, txt: '不明' };
+  const top = to || from;
+  const txt = over ? `${SCALE_NAME[from] || SCALE_NAME[top]}以上` : (!from || from === top) ? `${SCALE_NAME[top]}程度` : `${SCALE_NAME[from]}〜${SCALE_NAME[top]}`;
+  return { to: top, from, txt };
+}
+
+/** 全体の状態（ホームの大表示・タブの点・ティッカーで使う） */
+function systemStatus() {
+  const tsu = state.tsunami && !state.tsunami.cancelled && state.tsunami.areas && state.tsunami.areas.length ? (GRADE[tsuTop(state.tsunami.areas)] || GRADE.Unknown) : null;
+  const vola = volActive();
+  if (state.eew) return { lv: 3, label: '警戒', cls: 'bad', sub: `${state.eew.msg.drill ? '【訓練】' : ''}緊急地震速報が発表されています` };
+  if (tsu && tsu.rank >= 3) return { lv: 3, label: '警戒', cls: 'bad', sub: `${tsu.label}が発表されています` };
+  if (vola.length) return { lv: 3, label: '警戒', cls: 'bad', sub: `${vola[0].label}${vola[0].name ? '：' + vola[0].name : ''}` };
+  if (tsu) return { lv: 2, label: '注意', cls: 'warn', sub: `${tsu.label}が発表されています` };
+  const strong = state.events.filter(e => e.type !== 'Foreign' && Date.now() - e.t < 3600e3 && e.scale >= 45).sort((a, b) => b.scale - a.scale)[0];
+  if (strong) return { lv: 2, label: '注意', cls: 'warn', sub: `1時間以内に最大震度${scaleInfo(strong.scale).plain}の地震（${strong.name || '震源調査中'}）` };
+  if (state.status === 'offline') return { lv: 1, label: '接続なし', cls: 'dim', sub: 'オフラインです。キャッシュを表示しています' };
+  if (state.status !== 'live') return { lv: 1, label: '接続中', cls: 'dim', sub: 'リアルタイム配信に接続しています' };
+  return { lv: 0, label: '平常', cls: 'ok', sub: '現在、警戒すべき情報はありません' };
+}
+
+/* ---- 緊急地震速報の履歴（P2P 履歴 556 を発表イベントごとにまとめる） ---- */
+const eewLog = { items: [], at: 0, loading: false };
+async function fetchEewLog() {
+  if (eewLog.loading) return; eewLog.loading = true;
+  try {
+    const r = await fetch(`${CFG.apiBase}/history?codes=556&limit=30`, { cache: 'no-store' });
+    if (r.ok) {
+      const ev = new Map();
+      (await r.json()).forEach(m => {
+        if (m.test) return;
+        const id = (m.issue && m.issue.eventId) || m.id, o = ev.get(id) || { id, msg: m, cancelled: false };
+        if (m.cancelled) o.cancelled = true; else if (!ev.has(id) || o.cancelled) o.msg = ev.has(id) ? o.msg : m;
+        ev.set(id, o);
+      });
+      eewLog.items = [...ev.values()].filter(o => !o.msg.cancelled).slice(0, 6); eewLog.at = Date.now();
+    }
+  } catch { /* 通信エラーは前回の表示のまま */ }
+  eewLog.loading = false; if (curTab === 'home') renderHomePanel();
+}
+
+/* ---- 見守り地点 ---- */
+const placeStat = (p, d24) => {
+  let best = null, n = 0;
+  for (const e of d24) { const s = prefMap(e).get(p.prefName) || 0; if (s >= 10) { n++; if (!best || s > best.s) best = { s, e }; } }
+  return { best, n, f: state.eew ? eewPrefForecast(state.eew.msg, p.prefName) : null };
+};
+function renderPlacesSettings() {
+  const el = $('#placesList'); if (!el) return;
+  const ps = settings.places || [];
+  el.innerHTML = ps.length ? ps.map(p => `<div class="place"><b>${esc(p.name)}</b><small>${esc(p.prefName)}</small><button type="button" class="icon-btn icon-btn--sm" data-del="${esc(p.id)}" aria-label="${esc(p.name)}を削除"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button></div>`).join('') : '<p class="hint">まだ登録されていません。</p>';
+  $$('[data-del]', el).forEach(b => b.onclick = () => { settings.places = (settings.places || []).filter(p => p.id !== b.dataset.del); saveSettings(); renderPlacesSettings(); renderHomePanel(); });
+}
+function initPlaces() {
+  const sel = $('#placePref'); if (!sel) return;
+  sel.innerHTML = G.PREFS.map(p => `<option value="${p[0]}">${esc(p[1])}</option>`).join('');
+  $('#btnPlaceAdd').onclick = () => {
+    const code = +sel.value, p = G.byCode.get(code); if (!p) return;
+    if ((settings.places || []).length >= 4) { toast('見守り地点は最大4件です'); return; }
+    const name = ($('#placeName').value || '').trim().slice(0, 12) || p[1];
+    settings.places = [...(settings.places || []), { id: 'p' + Date.now().toString(36), name, pref: code, prefName: p[1] }];
+    $('#placeName').value = ''; saveSettings(); renderPlacesSettings(); renderHomePanel(); toast(`${name}（${p[1]}）を追加しました`);
+  };
+  renderPlacesSettings();
+}
+
+/* ---- ホーム画面 ---- */
+function renderHomePanel() {
+  const el = $('#tpHome'); if (!el) return;
+  const now = Date.now(), st = systemStatus();
+  const evs = state.events.filter(e => e.type !== 'Foreign').sort((a, b) => b.t - a.t), latest = evs[0];
+  const d24 = evs.filter(e => now - e.t < DAY), mx24 = d24.reduce((m, e) => Math.max(m, e.scale), 0);
+  const tsuOn = state.tsunami && !state.tsunami.cancelled && state.tsunami.areas && state.tsunami.areas.length;
+  let html = `<section class="hero hero--${st.cls}"><div class="hero__sig" aria-hidden="true"><i></i><i></i><i></i></div><div class="hero__txt"><small>SYSTEM STATUS</small><b>${esc(st.label)}</b><span>${esc(st.sub)}</span></div></section>`;
+
+  /* 現在地 */
+  if (settings.home) {
+    const hn = homeName(), mine = d24.filter(e => homeScale(e) >= 10), mineMax = mine.reduce((m, e) => Math.max(m, homeScale(e)), 0);
+    const fc = state.eew ? eewPrefForecast(state.eew.msg, hn) : null;
+    html += `<section class="hcard"><h3>現在地<span class="en">LOCATION</span></h3><div class="hloc"><b>${esc(hn || '登録済み')}</b>
+      ${fc ? `<span class="hloc__eew">緊急地震速報 予想震度 <b>${esc(fc.txt)}</b></span>` : mine.length ? `<span>24時間以内に ${mine.length}回揺れました（最大震度 <b>${esc(scaleInfo(mineMax).plain)}</b>）</span>` : '<span>24時間以内に揺れた地震はありません</span>'}</div></section>`;
+  } else html += `<section class="hcard"><h3>現在地<span class="en">LOCATION</span></h3><p class="hsub">現在地を登録すると、緊急地震速報の予想震度とS波到達カウントダウン、震源までの距離を表示します。</p><button type="button" class="btn btn--tonal btn--sm" data-act="settings">設定を開く</button></section>`;
+
+  /* 最新の地震 */
+  if (latest) {
+    const si = scaleInfo(latest.scale), dist = homeDist(latest), hs = homeScale(latest);
+    html += `<section class="hcard"><h3>最新の地震<span class="en">LATEST</span></h3><button type="button" class="hlatest" data-ev="${esc(latest.id)}" style="--sc:${si.bg}">
+      <span class="badge${si.plain.length > 1 ? ' two' : ''}" style="--c:${si.bg};--fg:${si.fg}"><span>${si.t}</span></span>
+      <span class="hlatest__main"><b>${esc(latest.name || '震源調査中')}</b><small class="segs">${[latest.mag >= 0 ? 'M' + latest.mag.toFixed(1) : '', depthText(latest.depth, true), dist != null && dist < 3000 ? '約' + Math.round(dist) + 'km' : ''].filter(Boolean).map(s => `<span>${esc(s)}</span>`).join('')}</small><small class="segs"><span>${esc(fmtDT.format(latest.t))}</span><span data-rel="${latest.t}">${esc(rel(latest.t))}</span>${hs ? `<span>あなたの地域 震度${esc(scaleInfo(hs).plain)}</span>` : ''}</small></span><span class="hlatest__go" aria-hidden="true">›</span></button></section>`;
+  }
+
+  /* 見守り地点 */
+  const ps = settings.places || [];
+  if (ps.length) {
+    html += `<section class="hcard"><h3>見守り地点<span class="en">WATCH</span></h3><ul class="hplaces">${ps.map(p => {
+      const s = placeStat(p, d24);
+      const body = s.f ? `<span class="hp__eew">予想 <b>${esc(s.f.txt)}</b></span>` : s.best ? `<span class="badge hp__b" style="--c:${scaleInfo(s.best.s).bg};--fg:${scaleInfo(s.best.s).fg}"><span>${scaleInfo(s.best.s).t}</span></span><span class="hp__t">${s.n}回 ・ ${esc(rel(s.best.e.t))}</span>` : '<span class="hp__t hp__t--ok">24時間 揺れなし</span>';
+      return `<li><span class="hp__n"><b>${esc(p.name)}</b><small>${esc(p.prefName)}</small></span><span class="hp__v">${body}</span></li>`;
+    }).join('')}</ul></section>`;
+  }
+
+  /* 直近の集計 */
+  const days = new Array(7).fill(0);
+  evs.forEach(e => { const k = Math.floor((now - e.t) / DAY); if (k >= 0 && k < 7) days[6 - k]++; });
+  const dmx = Math.max(1, ...days);
+  html += `<section class="hcard"><h3>直近の傾向<span class="en">TREND</span></h3><div class="htiles"><div><small>24時間</small><b>${d24.length}</b><span>回</span></div><div><small>震度3以上</small><b>${d24.filter(e => e.scale >= 30).length}</b><span>回</span></div><div><small>最大震度</small><b>${mx24 >= 10 ? esc(scaleInfo(mx24).plain) : '—'}</b><span>24時間</span></div></div>
+    <div class="hmini" aria-label="7日間の地震回数">${days.map((n, i) => `<span class="hmini__d" title="${n}回"><i style="height:${Math.max(n ? 8 : 2, n / dmx * 100)}%"></i><small>${i === 6 ? '今日' : (6 - i) + '日前'}</small></span>`).join('')}</div></section>`;
+
+  /* 緊急地震速報の履歴 */
+  html += `<section class="hcard"><h3>最近の緊急地震速報<span class="en">EEW LOG</span></h3>${eewLog.items.length ? `<ul class="heew">${eewLog.items.map(o => {
+    const m = o.msg, h = (m.earthquake && m.earthquake.hypocenter) || {}, mx = Math.max(0, ...(m.areas || []).map(a => (SCALE_NAME[a.scaleTo] ? a.scaleTo : SCALE_NAME[a.scaleFrom] ? a.scaleFrom : 0)));
+    const fc = settings.home ? eewPrefForecast(m, homeName()) : null;
+    return `<li><span class="heew__t">${esc(fmtDT.format(parseJst(m.time)))}</span><b>${esc(h.name || '震源調査中')}</b><small>${h.magnitude > 0 ? 'M' + Number(h.magnitude).toFixed(1) + ' ・ ' : ''}予想最大震度 ${mx ? esc(SCALE_NAME[mx]) : '—'}${fc ? ` ・ ${esc(homeName())} ${esc(fc.txt)}` : ''}${o.cancelled ? ' ・ 取り消し' : ''}</small></li>`;
+  }).join('')}</ul>` : `<p class="hsub">${eewLog.loading ? '読み込み中…' : eewLog.at ? '直近の緊急地震速報（警報）はありません' : '読み込めていません（下に引っ張って更新）'}</p>`}</section>`;
+
+  html += `<div class="hquick"><button type="button" class="btn btn--tonal btn--sm" data-act="monitor">リアルタイム監視</button><button type="button" class="btn btn--tonal btn--sm" data-act="drill">防災訓練</button><button type="button" class="btn btn--text btn--sm" data-act="settings">設定</button></div>`;
+  el.innerHTML = html;
+}
+
+/* ---- ティッカー（NERV 端末風の流れるステータス） ---- */
+function updateTicker() {
+  const el = $('#ticker'); if (!el) return;
+  const st = systemStatus(), evs = state.events.filter(e => e.type !== 'Foreign' && e.scale >= 10).sort((a, b) => b.t - a.t), l = evs[0];
+  const tsuOn = state.tsunami && !state.tsunami.cancelled && state.tsunami.areas && state.tsunami.areas.length, va = volActive();
+  const d24 = evs.filter(e => Date.now() - e.t < DAY), mx = d24.reduce((m, e) => Math.max(m, e.scale), 0);
+  const items = [
+    [`STATUS ${st.label}`, st.cls],
+    l ? [`最新 ${fmtDT.format(l.t)} ${l.name || '震源調査中'}${l.mag >= 0 ? ' M' + l.mag.toFixed(1) : ''} 最大震度${scaleInfo(l.scale).plain}`, l.scale >= 45 ? 'warn' : ''] : ['最新 履歴を取得中', ''],
+    [tsuOn ? `津波 ${(GRADE[tsuTop(state.tsunami.areas)] || GRADE.Unknown).label}発表中` : '津波 発表なし', tsuOn ? 'bad' : ''],
+    [va.length ? `噴火 ${va[0].label}${va[0].name ? '：' + va[0].name : ''}` : '噴火 速報・警報なし', va.length ? 'bad' : ''],
+    [`24時間 ${d24.length}回${mx >= 10 ? ' 最大震度' + scaleInfo(mx).plain : ''}`, '']
+  ];
+  const html = items.map(([t, c]) => `<span class="tk ${c}">${esc(t)}</span>`).join('<i class="tk__sep">◆</i>');
+  if (el.dataset.h === html) return; el.dataset.h = html;
+  el.innerHTML = `<div class="ticker__track" style="--dur:${Math.max(26, Math.round(html.length * .11))}s"><div>${html}<i class="tk__sep">◆</i></div><div aria-hidden="true">${html}<i class="tk__sep">◆</i></div></div>`;
+}
+function refreshInfoViews() { if (curTab === 'home') renderHomePanel(); updateTabDots(); updateTicker(); }
+
+/* 震度別の観測点数（詳細パネル用） */
+function scaleDist(ev) {
+  const c = new Map(); (ev.pts || []).forEach(([, , s]) => { const k = s === 46 ? 45 : s; c.set(k, (c.get(k) || 0) + 1); });
+  const keys = [70, 60, 55, 50, 45, 40, 30, 20, 10].filter(k => c.get(k)); if (!keys.length) return '';
+  const mx = Math.max(...keys.map(k => c.get(k)));
+  return `<div class="sdist" aria-label="震度別の観測点数">${keys.map(k => { const si = scaleInfo(k); return `<div class="sdist__row"><span class="badge" style="--c:${si.bg};--fg:${si.fg}"><span>${si.t}</span></span><span class="track"><i style="width:${(c.get(k) / mx * 100).toFixed(1)}%;background:${si.bg}"></i></span><b>${c.get(k)}</b></div>`; }).join('')}<small>震度別の観測地点数</small></div>`;
+}
+function initHome() {
+  const clock = $('#hdrClock'), tick = () => { if (clock) clock.textContent = new Date().toLocaleTimeString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' }) + ' JST'; };
+  tick(); setInterval(tick, 1000);
+  setInterval(updateTicker, 5000);
+  const home = $('#tpHome');
+  if (home) home.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act],[data-ev]'); if (!b) return;
+    if (b.dataset.ev) { setTab('quake'); const it = $(`.item[data-id="${CSS.escape(b.dataset.ev)}"]`); if (it) { it.click(); it.scrollIntoView({ block: 'center' }); } return; }
+    if (b.dataset.act === 'monitor') openMonitor();
+    else if (b.dataset.act === 'drill') startDrill();
+    else if (b.dataset.act === 'settings') $('#btnSettings').click();
+  });
+  initPlaces(); updateTicker();
+}
+
 /* ---------------- 起動 ---------------- */
 function init() {
   applyTheme();
@@ -1339,6 +1712,9 @@ function init() {
   on('#btnDiag', 'click', runDiag);
   on('#btnDrill', 'click', startDrill);
   on('#btnCsv', 'click', exportCsv);
+  on('#btnTestTopic', 'click', testTopic);
+  initTabs(); initHome(); wakeRelay();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeRelay(); });
   syncFilterUI();
 
   // 一覧・絞り込み
@@ -1403,7 +1779,7 @@ function init() {
   }
 }
 /* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
-const APP_VER = '2.2.0';
+const APP_VER = '2.4.1';
 async function fileProblems() {                      // 読み込めなかった js ファイルの原因（404 など）を調べる
   const out = [];
   for (const [f, ok] of [['js/geo.js', GEO_OK], ['js/stats.js', !!(window.Stats && window.Stats.render)]]) {
