@@ -384,6 +384,7 @@ function renderDetail(ev) {
     ${ev.cm ? `<div class="cm">${esc(ev.cm)}</div>` : ''}
     ${sdist}
     ${pHtml ? `<h4>各地の震度</h4>${pHtml}` : ''}
+    ${relatedHtml(ev)}
     <div class="meta">
       <div><span>情報の種類</span><span>${esc(TYPE_LABEL[ev.type] || ev.type)}</span></div>
       <div><span>発表</span><span>${esc(ev.src || '気象庁')} ${ev.it ? fmtFullSec.format(ev.it) : ''}</span></div>
@@ -393,10 +394,13 @@ function renderDetail(ev) {
     <div class="actions">
       ${ev.lat != null ? '<button class="btn btn--tonal btn--sm" data-act="waves" type="button">波の伝わりを再生</button>' : ''}
       <button class="btn btn--outline btn--sm" data-act="share" type="button"><svg viewBox="0 0 24 24"><use href="#i-share"/></svg>共有</button>
+      <button class="btn btn--outline btn--sm" data-act="shareimg" type="button"><svg viewBox="0 0 24 24"><use href="#i-share"/></svg>画像で共有</button>
       <a class="btn btn--outline btn--sm" href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_map" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><use href="#i-open"/></svg>気象庁</a>
     </div>`;
 }
 $('#detail').addEventListener('click', async (e) => {
+  const rv = e.target.closest('[data-rel-ev]');
+  if (rv) { const it = $(`.item[data-id="${CSS.escape(rv.dataset.relEv)}"]`); if (it) it.click(); else toast('一覧のフィルタで非表示になっています'); return; }
   const b = e.target.closest('[data-act]'); if (!b) return;
   const ev = state.events.find(x => x.id === state.selected); if (!ev) return;
   if (b.dataset.act === 'close') closeDetail();
@@ -405,6 +409,7 @@ $('#detail').addEventListener('click', async (e) => {
     startWaves({ lat: ev.lat, lon: ev.lon, depth: Math.max(ev.depth, 0) || 10, speed: 25, maxKm: Math.max(300, impactKm(ev.mag) * 1.6) });
     if (matchMedia('(max-width: 719px)').matches) setView('map');
   }
+  if (b.dataset.act === 'shareimg') { shareImage(ev); return; }
   if (b.dataset.act === 'share') {
     const text = shareText(ev);
     try { if (navigator.share) await navigator.share({ title: '地震情報', text, url: location.href.split('#')[0] }); else { await navigator.clipboard.writeText(text); toast('クリップボードにコピーしました'); } } catch { /* cancelled */ }
@@ -1411,7 +1416,7 @@ async function fetchTsunamiHistory() {
     const r = await fetch(`${CFG.apiBase}/history?codes=552&limit=20`, { cache: 'no-store' });
     if (r.ok) { tsuHist.items = await r.json(); tsuHist.at = Date.now(); }
   } catch { /* 通信エラーは空表示のまま */ }
-  tsuHist.loading = false; renderTsunamiPanel(); updateTabDots();
+  tsuHist.loading = false; renderTsunamiPanel(); updateTabDots(); if (curTab === 'home') renderHomePanel();
 }
 
 /* ---- 噴火（中継サーバー経由で気象庁フィードを取得） ---- */
@@ -1464,10 +1469,13 @@ const KIT = ['飲料水（1人1日3Lを目安に、最低3日分）', '非常食
 function renderPrepPanel() {
   const el = $('#tpPrep'); if (!el) return;
   const done = settings.prep || {};
-  el.innerHTML = `<p class="tfoot" style="margin-top:0">一般的な目安です。お住まいの自治体の指示・ハザードマップを優先してください。</p>
+  el.innerHTML = `<button type="button" class="btn hq-shaken" data-prep-shaken>揺れた！ 行動ガイドを開く</button>
+    <p class="tfoot" style="margin-top:0">一般的な目安です。お住まいの自治体の指示・ハザードマップを優先してください。</p>
     ${PREP.map(s => `<details class="pcard" ${s.id === 'eq' ? 'open' : ''}><summary><b>${s.title}</b><small>${s.sub}</small></summary><ul class="plist">${s.items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>`).join('')}
     <details class="pcard" open><summary><b>持ち出し品チェック</b><small>${KIT.filter((_, i) => done['k' + i]).length}/${KIT.length} 準備済み</small></summary><ul class="plist plist--chk">${KIT.map((t, i) => `<li><label><input type="checkbox" data-k="k${i}" ${done['k' + i] ? 'checked' : ''}><span>${esc(t)}</span></label></li>`).join('')}</ul></details>
-    <details class="pcard"><summary><b>連絡・確認</b><small>安否確認と避難場所</small></summary><ul class="plist"><li>災害用伝言ダイヤル <b>171</b>（体験利用日あり）。家族で連絡方法を決めておく</li><li>ハザードマップで自宅・職場・通学路の危険と避難場所を確認 <a href="https://disaportal.gsi.go.jp/" target="_blank" rel="noopener">ハザードマップポータル ↗</a></li></ul></details>`;
+    ${shindoGuideHtml()}
+    <details class="pcard"><summary><b>連絡・確認</b><small>安否確認と避難場所</small></summary><ul class="plist"><li>災害用伝言ダイヤル <b>171</b>（体験利用日あり）。家族で連絡方法を決めておく</li><li>ハザードマップで自宅・職場・通学路の危険と避難場所を確認 <a href="https://disaportal.gsi.go.jp/" target="_blank" rel="noopener">ハザードマップポータル ↗</a></li><li>近くの避難所を地図で探す <a href="${esc(shelterUrl())}" target="_blank" rel="noopener">地図で開く ↗</a></li></ul></details>`;
+  { const sb = $('[data-prep-shaken]', el); if (sb) sb.onclick = openShaken; }
   $$('input[data-k]', el).forEach(c => c.onchange = () => { settings.prep = { ...(settings.prep || {}), [c.dataset.k]: c.checked }; saveSettings(); const sm = c.closest('details').querySelector('summary small'); if (sm) sm.textContent = `${KIT.filter((_, i) => settings.prep['k' + i]).length}/${KIT.length} 準備済み`; });
 }
 
@@ -1482,7 +1490,7 @@ function setTab(name) {
   const q = name === 'quake';
   $('.list-head').hidden = !q; $('#scroll').hidden = !q;
   $('#tpHome').hidden = name !== 'home'; $('#tpTsunami').hidden = name !== 'tsunami'; $('#tpVolcano').hidden = name !== 'volcano'; $('#tpPrep').hidden = name !== 'prep';
-  if (name === 'home') { renderHomePanel(); fetchEewLog(); }
+  if (name === 'home') { renderHomePanel(); fetchEewLog(); fetchTsunamiHistory(); }
   if (name === 'tsunami') { renderTsunamiPanel(); fetchTsunamiHistory(); }
   if (name === 'volcano') { renderVolcanoPanel(); fetchVolcano(); }
   if (name === 'prep') renderPrepPanel();
@@ -1632,6 +1640,8 @@ function renderHomePanel() {
       <span class="hlatest__main"><b>${esc(latest.name || '震源調査中')}</b><small class="segs">${[latest.mag >= 0 ? 'M' + latest.mag.toFixed(1) : '', depthText(latest.depth, true), dist != null && dist < 3000 ? '約' + Math.round(dist) + 'km' : ''].filter(Boolean).map(s => `<span>${esc(s)}</span>`).join('')}</small><small class="segs"><span>${esc(fmtDT.format(latest.t))}</span><span data-rel="${latest.t}">${esc(rel(latest.t))}</span>${hs ? `<span>あなたの地域 震度${esc(scaleInfo(hs).plain)}</span>` : ''}</small></span><span class="hlatest__go" aria-hidden="true">›</span></button></section>`;
   }
 
+  html += timelineHtml();
+
   /* 見守り地点 */
   const ps = settings.places || [];
   if (ps.length) {
@@ -1656,7 +1666,7 @@ function renderHomePanel() {
     return `<li><span class="heew__t">${esc(fmtDT.format(parseJst(m.time)))}</span><b>${esc(h.name || '震源調査中')}</b><small>${h.magnitude > 0 ? 'M' + Number(h.magnitude).toFixed(1) + ' ・ ' : ''}予想最大震度 ${mx ? esc(SCALE_NAME[mx]) : '—'}${fc ? ` ・ ${esc(homeName())} ${esc(fc.txt)}` : ''}${o.cancelled ? ' ・ 取り消し' : ''}</small></li>`;
   }).join('')}</ul>` : `<p class="hsub">${eewLog.loading ? '読み込み中…' : eewLog.at ? '直近の緊急地震速報（警報）はありません' : '読み込めていません（下に引っ張って更新）'}</p>`}</section>`;
 
-  html += `<div class="hquick"><button type="button" class="btn btn--tonal btn--sm" data-act="monitor">リアルタイム監視</button><button type="button" class="btn btn--tonal btn--sm" data-act="drill">防災訓練</button><button type="button" class="btn btn--text btn--sm" data-act="settings">設定</button></div>`;
+  html += `<div class="hquick"><button type="button" class="btn btn--sm hq-shaken" data-act="shaken">揺れた！ 行動ガイド</button><button type="button" class="btn btn--tonal btn--sm" data-act="monitor">リアルタイム監視</button><button type="button" class="btn btn--tonal btn--sm" data-act="drill">防災訓練</button><button type="button" class="btn btn--text btn--sm" data-act="settings">設定</button></div>`;
   el.innerHTML = html;
 }
 
@@ -1692,13 +1702,166 @@ function initHome() {
   setInterval(updateTicker, 5000);
   const home = $('#tpHome');
   if (home) home.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-act],[data-ev]'); if (!b) return;
+    const b = e.target.closest('[data-act],[data-ev],[data-tab]'); if (!b) return;
+    if (b.dataset.tab) { setTab(b.dataset.tab); return; }
     if (b.dataset.ev) { setTab('quake'); const it = $(`.item[data-id="${CSS.escape(b.dataset.ev)}"]`); if (it) { it.click(); it.scrollIntoView({ block: 'center' }); } return; }
     if (b.dataset.act === 'monitor') openMonitor();
+    else if (b.dataset.act === 'shaken') openShaken();
     else if (b.dataset.act === 'drill') startDrill();
     else if (b.dataset.act === 'settings') $('#btnSettings').click();
   });
   initPlaces(); updateTicker();
+}
+
+/* =========================================================
+   タイムライン / 余震・関連地震 / 揺れた！行動ガイド / 震度の目安 / 画像で共有
+   ========================================================= */
+const fmtOffset = (ms) => {
+  const m = Math.round(Math.abs(ms) / 60e3);
+  if (m < 60) return `${Math.max(1, m)}分`;
+  if (m < 1440) return `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}`;
+  return `${Math.floor(m / 1440)}日${Math.floor((m % 1440) / 60)}時間`;
+};
+const shelterUrl = () => {
+  const h = settings.home, q = encodeURIComponent('避難所');
+  return h ? `https://www.google.com/maps/search/${q}/@${h.lat.toFixed(4)},${h.lon.toFixed(4)},14z` : `https://www.google.com/maps/search/${q}`;
+};
+
+/* ---- 余震・関連地震（読み込み済みの履歴から、同じ震源域の前後の地震を拾う） ---- */
+function relatedQuakes(ev) {
+  if (ev.lat == null || ev.type === 'Foreign') return null;
+  const R = ev.mag >= 6 ? 150 : ev.mag >= 5 ? 90 : 50;                 // 震源域とみなす半径(km)の目安
+  const rel = state.events.filter(e => e.id !== ev.id && e.lat != null && e.type !== 'Foreign' && e.t > ev.t - DAY && e.t < ev.t + 7 * DAY && G.haversine(ev.lat, ev.lon, e.lat, e.lon) <= R);
+  if (!rel.length) return null;
+  return { R, before: rel.filter(e => e.t < ev.t), after: rel.filter(e => e.t > ev.t), all: rel };
+}
+function relatedHtml(ev) {
+  const r = relatedQuakes(ev); if (!r) return '';
+  const mx = r.all.reduce((m, e) => Math.max(m, e.scale), 0), mm = r.all.reduce((m, e) => Math.max(m, e.mag), -1);
+  const rows = r.all.slice().sort((a, b) => Math.abs(a.t - ev.t) - Math.abs(b.t - ev.t)).slice(0, 6).sort((a, b) => a.t - b.t);
+  return `<div class="rel"><h4>同じ震源域の地震<span class="en">RELATED</span></h4>
+    <p class="rel__sum">半径約${r.R}km ・ この地震の前24時間 <b>${r.before.length}件</b> ／ 以降7日間 <b>${r.after.length}件</b>${mx >= 10 ? ` ・ 最大 震度${esc(scaleInfo(mx).plain)}${mm >= 0 ? ' / M' + mm.toFixed(1) : ''}` : ''}</p>
+    <div class="rel__rows">${rows.map(e => { const si = scaleInfo(e.scale); return `<button type="button" class="relrow" data-rel-ev="${esc(e.id)}"><span class="badge" style="--c:${si.bg};--fg:${si.fg}"><span>${si.t}</span></span><span class="relrow__t"><b>${esc(e.name || '震源調査中')}${e.mag >= 0 ? ' M' + e.mag.toFixed(1) : ''}</b><small>この地震の${fmtOffset(e.t - ev.t)}${e.t < ev.t ? '前' : '後'}</small></span></button>`; }).join('')}</div>
+    <small class="rel__note">読み込み済みの履歴 ${state.events.length}件からの集計です。直後の余震は震度が小さくても発表されないことがあります。</small></div>`;
+}
+
+/* ---- タイムライン（地震・津波・噴火・緊急地震速報を時系列で） ---- */
+function timelineItems() {
+  const items = [];
+  state.events.filter(e => e.type !== 'Foreign').forEach(e => {
+    const si = scaleInfo(e.scale);
+    items.push({ t: e.t, kind: 'quake', ev: e.id, c: si.bg, fg: si.fg, tag: e.scale >= 10 ? `震度${si.plain}` : '震度不明', title: e.name || '震源調査中', sub: [e.mag >= 0 ? 'M' + e.mag.toFixed(1) : '', depthText(e.depth, true)].filter(Boolean).join(' ・ ') });
+  });
+  const ts = new Map(); [state.tsunami, ...tsuHist.items].filter(Boolean).forEach(m => ts.set(m.id, m));
+  ts.forEach(m => {
+    const t = parseJst(m.time); if (!Number.isFinite(t)) return;
+    const off = m.cancelled || !(m.areas && m.areas.length), g = off ? null : (GRADE[tsuTop(m.areas)] || GRADE.Unknown);
+    items.push({ t, kind: 'tsunami', tab: 'tsunami', c: g ? (g.rank >= 4 ? 'var(--major-bg)' : g.rank === 3 ? 'var(--eew-bg)' : 'var(--md-tertiary)') : 'var(--md-outline)', tag: g ? g.label.replace('津波', '') : '解除', title: off ? '津波予報の解除' : `${g.label}を発表`, sub: off ? '' : `${m.areas.length}地域` });
+  });
+  vol.items.filter(x => ['flash', 'warning', 'obs'].includes(x.kind)).forEach(x => {
+    const t = Date.parse(x.updated); if (!Number.isFinite(t)) return;
+    items.push({ t, kind: 'volcano', tab: 'volcano', c: VOL_ALERT(x) ? 'var(--md-error)' : 'var(--md-tertiary)', tag: x.kind === 'obs' ? '観測報' : x.label, title: x.name || x.title, sub: x.kind === 'obs' ? '噴火に関する火山観測報' : '' });
+  });
+  eewLog.items.forEach(o => {
+    const t = parseJst(o.msg.time); if (!Number.isFinite(t)) return;
+    const h = (o.msg.earthquake && o.msg.earthquake.hypocenter) || {};
+    items.push({ t, kind: 'eew', tab: 'home', c: 'var(--eew-bg)', tag: '緊急地震速報', title: h.name || '震源調査中', sub: h.magnitude > 0 ? 'M' + Number(h.magnitude).toFixed(1) : '' });
+  });
+  return items.sort((a, b) => b.t - a.t).slice(0, 14);
+}
+function timelineHtml() {
+  const items = timelineItems(); if (!items.length) return '';
+  return `<section class="hcard"><h3>タイムライン<span class="en">TIMELINE</span></h3><ol class="tline">${items.map(i => `<li class="tl tl--${i.kind}"><button type="button" ${i.ev ? `data-ev="${esc(i.ev)}"` : i.tab !== 'home' ? `data-tab="${i.tab}"` : 'disabled'} style="--tc:${i.c};--tf:${i.fg || '#fff'}"><time>${esc(fmtDT.format(i.t))}</time><span class="tl__main"><b>${esc(i.title)}</b>${i.sub ? `<small>${esc(i.sub)}</small>` : ''}</span><span class="tl__tag">${esc(i.tag)}</span></button></li>`).join('')}</ol></section>`;
+}
+
+/* ---- 揺れた！ 行動ガイド ---- */
+const SHAKEN_STEPS = [
+  ['揺れている間', '頭を守り、丈夫な机の下など安全な場所へ。無理に動かず、揺れが収まるのを待つ'],
+  ['火の始末', '揺れが収まってから、落ち着いて火を消す。ガスの元栓を閉める'],
+  ['出口を確保', 'ドアや窓を開けて避難口を確保。ガラスの破片に注意して、靴を履く'],
+  ['海岸・川の近くなら', '警報を待たず、ただちに高台や津波避難ビルへ'],
+  ['情報を確認', '津波・余震の情報を確認。ラジオや自治体の情報も参考にする'],
+  ['家族の安否', '通話は控えてメッセージを使うか、災害用伝言ダイヤル171を利用'],
+  ['避難が必要なとき', '建物の損傷、ガスのにおい、火災があれば、ブレーカーを切って安全な場所へ避難']
+];
+const shaken = { t0: 0, iv: 0 };
+function shakenStatusHtml() {
+  const now = Date.now(), chips = [];
+  const l = state.events.filter(e => e.type !== 'Foreign' && e.scale >= 10).sort((a, b) => b.t - a.t)[0];
+  if (state.eew) chips.push(['bad', '緊急地震速報 発表中']);
+  const tsu = state.tsunami && !state.tsunami.cancelled && state.tsunami.areas && state.tsunami.areas.length ? (GRADE[tsuTop(state.tsunami.areas)] || GRADE.Unknown) : null;
+  chips.push(tsu ? ['bad', `${tsu.label} 発表中`] : ['ok', '津波予報: 発表なし']);
+  if (l && now - l.t < 30 * 60e3) chips.push(['warn', `直近の地震: 震度${scaleInfo(l.scale).plain} ${l.name || '震源調査中'}（${fmtOffset(now - l.t)}前）`]);
+  else chips.push(['dim', '直近30分の地震情報はありません（発表まで数分かかります）']);
+  if (l && l.scale >= 45 && now - l.t < 3 * DAY) chips.push(['warn', '余震に注意してください']);
+  return chips.map(([c, t]) => `<span class="pill pill--${c === 'dim' ? 'warn' : c}">${esc(t)}</span>`).join('');
+}
+function openShaken() {
+  const d = $('#shaken'); if (!d) return;
+  $$('dialog[open]').forEach(x => x.close());
+  shaken.t0 = Date.now();
+  $('#shakenBody').innerHTML = `<div class="sk__top"><div class="sk__timer"><small>経過時間</small><b id="skT">00:00</b></div><div id="skStatus" class="sk__status"></div></div>
+    <p class="sk__hint">落ち着いて、上から順に確認してください。チェックは目安です。</p>
+    <ol class="sk__steps">${SHAKEN_STEPS.map(([t, s], i) => `<li><label><input type="checkbox"><span class="sk__n">${i + 1}</span><span class="sk__txt"><b>${esc(t)}</b><small>${esc(s)}</small></span></label></li>`).join('')}</ol>
+    <div class="sk__acts"><button type="button" class="btn btn--tonal" data-sk="tsunami">津波情報を見る</button><button type="button" class="btn btn--tonal" data-sk="latest">最新の地震を見る</button><a class="btn btn--tonal" href="${esc(shelterUrl())}" target="_blank" rel="noopener">避難所を地図で探す ↗</a></div>
+    <p class="tfoot">命に関わるときは 119（消防・救急）/ 110（警察）。</p>`;
+  const tick = () => {
+    const s = Math.floor((Date.now() - shaken.t0) / 1000), el = $('#skT'); if (!el) return;
+    el.textContent = `${pad2(Math.floor(s / 60))}:${pad2(s % 60)}`;
+    const st = $('#skStatus'), h = shakenStatusHtml(); if (st.dataset.h !== h) { st.dataset.h = h; st.innerHTML = h; }
+  };
+  tick(); clearInterval(shaken.iv); shaken.iv = setInterval(tick, 1000);
+  d.showModal();
+}
+function closeShaken() { clearInterval(shaken.iv); const d = $('#shaken'); if (d && d.open) d.close(); }
+
+/* ---- 震度の目安（気象庁の震度階級関連解説表を要約） ---- */
+const SHINDO_GUIDE = [
+  [0, '揺れを感じない。地震計には記録される'], [10, '屋内で静かにしていると、わずかに揺れを感じる人がいる'],
+  [20, '屋内で静かにしている人の大半が揺れを感じる。吊り下げ物がわずかに揺れる'], [30, '屋内のほとんどの人が揺れを感じる。棚の食器が音を立てることがある'],
+  [40, 'ほとんどの人が驚く。吊り下げ物が大きく揺れ、座りの悪い物が倒れることがある'], [45, '大半の人が恐怖を覚え、物につかまりたくなる。食器や本が落ち、固定していない家具が動くことがある'],
+  [50, '物につかまらないと歩くのが難しい。落ちる物が多くなり、固定していない家具が倒れることがある。補強のないブロック塀が崩れることがある'],
+  [55, '立っているのが困難。固定していない家具の大半が動き、倒れるものもある。ドアが開かなくなることがある。壁のタイルや窓ガラスが壊れ、落ちることがある'],
+  [60, 'はわないと動けない。飛ばされることもある。固定していない家具のほとんどが動き、倒れる。耐震性の低い木造建物は傾いたり倒れたりするものが多くなる'],
+  [70, '耐震性の高い建物でも傾くことがある。大きな地割れや地すべり、山の崩壊が起きることがある']
+];
+function shindoGuideHtml() {
+  return `<details class="pcard"><summary><b>震度の目安</b><small>揺れの強さと、起きること</small></summary><ul class="shindo">${SHINDO_GUIDE.map(([v, t]) => { const si = v ? scaleInfo(v) : { bg: '#8a8f98', fg: '#fff', t: '0' }; return `<li><span class="badge" style="--c:${si.bg};--fg:${si.fg}"><span>${si.t}</span></span><span>${esc(t)}</span></li>`; }).join('')}</ul><p class="tfoot" style="padding:0 16px 14px">気象庁「震度階級関連解説表」を要約。実際の被害は、建物の耐震性や地盤などで変わります。</p></details>`;
+}
+
+/* ---- 画像で共有（NERV 風のカード） ---- */
+async function shareImage(ev) {
+  try { await document.fonts.ready; } catch { /* noop */ }
+  const W = 1200, H = 630, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d'), si = scaleInfo(ev.scale, ev.type === 'Foreign');
+  const SANS = '"Roboto Flex","Noto Sans JP","Hiragino Sans","Noto Sans CJK JP",sans-serif', SERIF = '"Shippori Mincho B1","Hiragino Mincho ProN","Noto Serif CJK JP",serif';
+  c.fillStyle = '#050506'; c.fillRect(0, 0, W, H);
+  c.strokeStyle = 'rgba(255,138,31,.09)'; c.lineWidth = 1; c.beginPath();
+  for (let x = 0; x <= W; x += 48) { c.moveTo(x + .5, 0); c.lineTo(x + .5, H); } for (let y = 0; y <= H; y += 48) { c.moveTo(0, y + .5); c.lineTo(W, y + .5); } c.stroke();
+  const stripe = (y) => { c.save(); c.beginPath(); c.rect(0, y, W, 16); c.clip(); for (let x = -40; x < W + 40; x += 32) { c.fillStyle = (x / 32) % 2 ? '#0b0b0b' : '#ffc400'; c.beginPath(); c.moveTo(x, y + 16); c.lineTo(x + 16, y); c.lineTo(x + 32, y); c.lineTo(x + 16, y + 16); c.fill(); } c.restore(); };
+  stripe(0); stripe(H - 16);
+  c.textBaseline = 'alphabetic'; c.fillStyle = '#ff9a3c'; c.font = `700 24px ${SANS}`; c.fillText('SEISMIC REPORT', 70, 84);
+  c.fillStyle = '#f2eeee'; c.font = `800 40px ${SERIF}`; c.fillText('地震情報', 70, 132);
+  c.textAlign = 'right'; c.fillStyle = '#b9b2b2'; c.font = `600 26px ${SANS}`; c.fillText(fmtFull.format(ev.t) + ' 頃発生', W - 70, 112); c.textAlign = 'left';
+  const bx = 70, by = 170, bs = 300;
+  c.fillStyle = si.bg; c.beginPath(); c.roundRect(bx, by, bs, bs, 56); c.fill();
+  c.fillStyle = si.fg; c.textAlign = 'center'; c.font = `600 28px ${SANS}`; c.fillText('最大震度', bx + bs / 2, by + 62);
+  c.font = `900 ${si.plain.length > 2 ? 104 : 150}px ${SANS}`; c.fillText(si.plain, bx + bs / 2, by + 220); c.textAlign = 'left';
+  const x0 = 420; let y = 230;
+  c.fillStyle = '#ffffff'; c.font = `800 62px ${SERIF}`;
+  let name = ev.name || '震源調査中'; while (c.measureText(name).width > W - x0 - 70 && name.length > 3) name = name.slice(0, -1); c.fillText(name, x0, y);
+  y += 70; c.font = `700 40px ${SANS}`; c.fillStyle = '#ffd9b0';
+  c.fillText([ev.mag >= 0 ? 'M ' + ev.mag.toFixed(1) : '', depthText(ev.depth, true)].filter(Boolean).join('   ／   ') || '規模・深さは調査中', x0, y);
+  const dist = homeDist(ev), hs = homeScale(ev); y += 62; c.font = `600 30px ${SANS}`; c.fillStyle = '#b9b2b2';
+  if (hs && settings.home) c.fillText(`${homeName()}では 震度${scaleInfo(hs).plain}`, x0, y);
+  else if (dist != null && settings.home && dist < 3000) c.fillText(`現在地から約${Math.round(dist)}km`, x0, y);
+  y += 56; c.fillStyle = ev.tsu && ev.tsu !== 'None' && ev.tsu !== 'Unknown' ? '#ff6b5e' : '#7ee0a8'; c.font = `700 30px ${SANS}`;
+  c.fillText((TSU_LABEL[ev.tsu] || TSU_LABEL.Unknown)[0], x0, y);
+  c.fillStyle = '#7d7777'; c.font = `500 22px ${SANS}`; c.fillText('地震速報 ・ 出典: P2P地震情報 / 気象庁', 70, H - 40);
+  const blob = await new Promise(r => cv.toBlob(r, 'image/png')); if (!blob) { toast('画像を作成できませんでした'); return; }
+  const file = new File([blob], `地震情報_${fmtJst(ev.t).replace(/[\/: ]/g, '').slice(0, 12)}.png`, { type: 'image/png' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: '地震情報', text: shareText(ev) }); } catch { /* 取り消し */ } return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); toast('画像を保存しました');
 }
 
 /* ---------------- 起動 ---------------- */
@@ -1716,6 +1879,9 @@ function init() {
   on('#btnDrill', 'click', startDrill);
   on('#btnCsv', 'click', exportCsv);
   on('#btnTestTopic', 'click', testTopic);
+  on('#shakenClose', 'click', closeShaken);
+  on('#shaken', 'close', () => clearInterval(shaken.iv));
+  on('#shakenBody', 'click', (e) => { const b = e.target.closest('[data-sk]'); if (!b) return; closeShaken(); if (b.dataset.sk === 'tsunami') setTab('tsunami'); else { setTab('quake'); const f = $('.item'); if (f) f.click(); } });
   initTabs(); initHome(); wakeRelay();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeRelay(); });
   syncFilterUI();
@@ -1782,7 +1948,7 @@ function init() {
   }
 }
 /* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
-const APP_VER = '2.4.2';
+const APP_VER = '2.5.0';
 async function fileProblems() {                      // 読み込めなかった js ファイルの原因（404 など）を調べる
   const out = [];
   for (const [f, ok] of [['js/geo.js', GEO_OK], ['js/stats.js', !!(window.Stats && window.Stats.render)]]) {
