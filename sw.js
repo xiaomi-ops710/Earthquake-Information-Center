@@ -1,5 +1,5 @@
 /* Service Worker: オフラインキャッシュ + FCM バックグラウンド通知 */
-const VER = 'v2.4.2';
+const VER = 'v2.5.0';
 const SHELL = `shell-${VER}`, TILES = 'tiles-v1', LIBS = 'libs-v1';
 const SHELL_FILES = ['./', './index.html', './css/app.css', './js/app.js', './js/geo.js', './js/stats.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];

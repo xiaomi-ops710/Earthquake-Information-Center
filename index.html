@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>地震・津波速報</title>
 <meta name="theme-color" content="#050506">
-<meta name="app-version" content="2.4.2">
+<meta name="app-version" content="2.5.0">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -342,6 +342,13 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
       <p class="hint">感知は P2P 地震情報の利用者が端末で揺れを検知した参考情報で、震度ではありません。この画面を含め、アプリを開いている間に受信した分だけを表示します。</p>
     </aside>
   </div>
+</dialog>
+<dialog id="shaken" class="dialog dialog--full dialog--shaken" aria-label="揺れた！行動ガイド">
+  <div class="sheet__head">
+    <h2>揺れた！<span class="en">ACTION GUIDE</span></h2>
+    <button id="shakenClose" class="icon-btn" aria-label="閉じる"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
+  </div>
+  <div id="shakenBody" class="shaken"></div>
 </dialog>
 <div id="tip" class="tip" hidden></div>
 
