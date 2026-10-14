@@ -1340,7 +1340,10 @@ async function testTopic() {
   if (!settings.push || !settings.pushToken) { toast('先に「プッシュ通知（FCM）」をオンにしてください'); return; }
   toast('配信経路テストを送信中…（実際の地震通知と同じトピック経由）');
   try { const j = await relay('/test-topic', { token: settings.pushToken, ...desiredSub() }); toast(`送信しました（経路: ${j.via || 'トピック'}）。アプリを閉じて通知が届くか確認してください`); }
-  catch (e) { toast((e && e.message) || '配信経路テストに失敗しました'); }
+  catch (e) {
+    if (e && e.status === 404) banner('⚠ 中継サーバーが古い版のまま動いています（配信経路テストが未対応: HTTP 404）。GitHub の relay/ に最新の server.js と package.json を上げ、Render の Events で「Deploy succeeded」になっているか確認してください。<br>確認: ブラウザで <b>' + esc(CFG.relayUrl.replace(/\/$/, '')) + '/healthz</b> を開き、<b>"v":3</b> と出れば新版です。');
+    else toast((e && e.message) || '配信経路テストに失敗しました');
+  }
 }
 function startDrill() {
   $$('dialog[open]').forEach(d => d.close());
@@ -1779,7 +1782,7 @@ function init() {
   }
 }
 /* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
-const APP_VER = '2.4.1';
+const APP_VER = '2.4.2';
 async function fileProblems() {                      // 読み込めなかった js ファイルの原因（404 など）を調べる
   const out = [];
   for (const [f, ok] of [['js/geo.js', GEO_OK], ['js/stats.js', !!(window.Stats && window.Stats.render)]]) {
