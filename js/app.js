@@ -525,13 +525,19 @@ function toast(msg) {
   clearTimeout(toast._t);
   toast._t = setTimeout(() => { t.classList.remove('show'); setTimeout(() => { try { if (!t.classList.contains('show') && t.hidePopover) t.hidePopover(); } catch { /* noop */ } }, 350); }, 3400);
 }
+/* 通知文（中継サーバーの relay/logic.js と同じ書式）。震度1〜4は1回、震度5弱以上は「②震度速報 → ③全情報」 */
 const quakeText = (ev) => {
-  const si = scaleInfo(ev.scale, ev.type === 'Foreign');
-  return {
-    title: ev.type === 'Foreign' ? '海外で大きな地震' : `地震 最大震度${si.plain}`,
-    body: `${ev.name || '震源調査中'} ${ev.mag >= 0 ? 'M' + ev.mag.toFixed(1) : ''} ${depthText(ev.depth, true)}  ${fmtHM.format(ev.t)}頃発生`.replace(/\s+/g, ' ').trim()
-  };
+  if (ev.type === 'Foreign') return { title: '海外で大きな地震', body: `${ev.name || '震源調査中'} ${ev.mag >= 0 ? 'M' + ev.mag.toFixed(1) : ''}`.trim() };
+  const si = scaleInfo(ev.scale), [hh, mm] = fmtHM.format(ev.t).split(':'), dep = ev.depth === 0 ? '深さごく浅い' : ev.depth > 0 ? `深さ${ev.depth}km` : '';
+  if (ev.scale >= 45) {
+    const full = !!ev.name && ev.mag >= 0 && ev.depth >= 0, name = ev.name || strongAreaOf(ev);
+    if (!full) return { title: `⚠️緊急地震速報⚠️最大震度${si.plain}`, body: `${name ? name + '　' : ''}引き続き強い揺れに警戒してください` };
+    const spec = [ev.mag >= 0 ? 'M' + ev.mag.toFixed(1) : '', dep].filter(Boolean).join(' ');
+    return { title: `⚠️${name ? name + 'で' : ''}最大震度${si.plain}`, body: `${hh}:${mm}頃に${spec}${spec ? 'の' : ''}地震が発生しました` };
+  }
+  return { title: `🚨地震　最大震度${si.plain}　${hh}：${mm}頃発生`, body: [ev.name || '震源調査中', ev.mag >= 0 ? 'M' + ev.mag.toFixed(1) : '', dep].filter(Boolean).join('　') };
 };
+const strongAreaOf = (ev) => { let best = null; (ev.pts || []).forEach(([pref, addr, s]) => { if (!best || s > best[1]) best = [pref, s]; }); return best ? best[0] : ''; };
 /* 通知条件: 全国のしきい値 / 地域別のしきい値 */
 function passRules(ev) {
   const r = [];
@@ -557,7 +563,6 @@ function applyQuake(m, { live }) {
   flash(urgent); beep(urgent);
   const tx = quakeText(r.ev);
   let title = tx.title, body = tx.body;
-  if (after.includes('region') && !after.includes('nation')) { const n2 = regionPrefName(), s2 = prefMap(r.ev).get(n2); title = `${n2}で震度${scaleInfo(s2).plain}`; }
   notify(title, body, 'eq-' + r.ev.key, urgent);
   const hs = homeScale(r.ev);
   if (urgent || homeScale(r.ev) >= 45) {
@@ -636,7 +641,10 @@ function applyEew(m) {
   if (isNew) {
     flash(true); beep(true);
     showOverlay({ tone: 'eew', eew: true, kind: m.drill ? '【訓練】緊急地震速報（警報）' : '緊急地震速報（警報）', title: m.drill ? 'これは訓練です。強い揺れに警戒' : '強い揺れに警戒してください', sub: `${h.name || '震源調査中'}${h.magnitude > 0 ? ' M' + Number(h.magnitude).toFixed(1) : ''}${(() => { const f = eewPrefForecast(m, homeName()); return f ? ` ／ ${homeName()} 予想震度 ${f.txt}` : ''; })()}` });
-    if (!m.drill) notify('緊急地震速報（警報）', `${h.name || '震源調査中'} 強い揺れに警戒してください`, 'eew', true);
+    if (!m.drill) {
+      const mx = Math.max(0, ...(m.areas || []).map(x => (SCALE_NAME[x.scaleTo] ? x.scaleTo : SCALE_NAME[x.scaleFrom] ? x.scaleFrom : 0))), lead = h.name ? `${h.name}で` : '';
+      notify('⚠️緊急地震速報⚠️', mx ? `${lead}最大震度${SCALE_NAME[mx]}　強い揺れに警戒してください` : `${lead}地震　強い揺れに警戒してください`, 'eq-' + String((m.earthquake && m.earthquake.originTime) || m.time || '').slice(0, 16), true);
+    }
     speak(m.drill ? 'これは訓練です。緊急地震速報。強い揺れに警戒してください。' : '緊急地震速報。強い揺れに警戒してください。', true);
   }
   clearInterval(eewTick); eewTick = setInterval(updateCd, 80);
@@ -1060,6 +1068,7 @@ function syncSettingsUI() {
   chipSet('#themeMode', settings.theme.mode);
   $$('#swatches .swatch').forEach(b => b.setAttribute('aria-checked', String(+b.dataset.h === +settings.theme.hue)));
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  renderSettingsSummary();
   $('#installNote').hidden = standalone || !/iPad|iPhone|Macintosh/.test(navigator.userAgent) || !('ontouchend' in document);
 }
 function syncFilterUI() {
@@ -1086,7 +1095,7 @@ function initSettingsUI() {
   $('#regionPref').innerHTML = '<option value="0">都道府県を選択</option>' + G.PREFS.map(p => `<option value="${p[0]}">${p[1]}</option>`).join('');
   $('#homePref').innerHTML = '<option value="0">都道府県から手動設定</option>' + G.PREFS.map(p => `<option value="${p[0]}">${p[1]}</option>`).join('');
   $('#swatches').innerHTML = SWATCHES.map(([h, n]) => `<button type="button" class="swatch" role="radio" data-h="${h}" style="--sw:${h}" aria-label="${n}" title="${n}"></button>`).join('');
-  $('#btnSettings').onclick = () => { syncSettingsUI(); dlg.showModal(); };
+  $('#btnSettings').onclick = () => openSettingsTab();
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
 
   $('#optNotify').onchange = async (e) => {
@@ -1630,7 +1639,7 @@ function renderHomePanel() {
     const fc = state.eew ? eewPrefForecast(state.eew.msg, hn) : null;
     html += `<section class="hcard"><h3>現在地<span class="en">LOCATION</span></h3><div class="hloc"><b>${esc(hn || '登録済み')}</b>
       ${fc ? `<span class="hloc__eew">緊急地震速報 予想震度 <b>${esc(fc.txt)}</b></span>` : mine.length ? `<span>24時間以内に ${mine.length}回揺れました（最大震度 <b>${esc(scaleInfo(mineMax).plain)}</b>）</span>` : '<span>24時間以内に揺れた地震はありません</span>'}</div></section>`;
-  } else html += `<section class="hcard"><h3>現在地<span class="en">LOCATION</span></h3><p class="hsub">現在地を登録すると、緊急地震速報の予想震度とS波到達カウントダウン、震源までの距離を表示します。</p><button type="button" class="btn btn--tonal btn--sm" data-act="settings">設定を開く</button></section>`;
+  } else html += `<section class="hcard"><h3>現在地<span class="en">LOCATION</span></h3><p class="hsub">現在地を登録すると、緊急地震速報の予想震度とS波到達カウントダウン、震源までの距離を表示します。</p><button type="button" class="btn btn--tonal btn--sm" data-act="settings-place">現在地を設定する</button></section>`;
 
   /* 最新の地震 */
   if (latest) {
@@ -1708,7 +1717,8 @@ function initHome() {
     if (b.dataset.act === 'monitor') openMonitor();
     else if (b.dataset.act === 'shaken') openShaken();
     else if (b.dataset.act === 'drill') startDrill();
-    else if (b.dataset.act === 'settings') $('#btnSettings').click();
+    else if (b.dataset.act === 'settings-place') openSettingsTab('place');
+    else if (b.dataset.act === 'settings') openSettingsTab();
   });
   initPlaces(); updateTicker();
 }
@@ -1864,6 +1874,54 @@ async function shareImage(ev) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); toast('画像を保存しました');
 }
 
+/* =========================================================
+   設定画面: カテゴリ切り替え / 行全体のタップ / 現在の通知設定
+   ========================================================= */
+const SX_KEY = 'eqm.sx';
+const SX_SCALE = { 10: '震度1以上', 30: '震度3以上', 40: '震度4以上', 45: '震度5弱以上', 55: '震度6弱以上' };
+function showSxTab(k) {
+  const tabs = $$('.sx__tab'); if (!tabs.length) return;
+  if (!tabs.some(t => t.dataset.sx === k)) k = 'notify';
+  tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.sx === k)));
+  $$('.sx__panel').forEach(p => { p.hidden = p.dataset.sxPanel !== k; });
+  const ps = $('.sx__panels'); if (ps) ps.scrollTop = 0;
+  try { sessionStorage.setItem(SX_KEY, k); } catch { /* noop */ }
+}
+function openSettingsTab(k) {
+  const dlg = $('#settings'); if (!dlg) return;
+  syncSettingsUI(); renderSettingsSummary();
+  showSxTab(k || (() => { try { return sessionStorage.getItem(SX_KEY); } catch { return null; } })() || 'notify');
+  if (!dlg.open) dlg.showModal();
+}
+/* 現在の通知設定（通知タブの先頭）と、通知タブの注意マーク */
+function renderSettingsSummary() {
+  const el = $('#sxSummary'); if (!el) return;
+  const reg = !!(settings.push && settings.pushToken), perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const pill = (cls, k, v) => `<span class="pill pill--${cls}"><b>${esc(k)}</b>${esc(v)}</span>`;
+  const rg = settings.region.on && settings.region.pref ? `${regionPrefName() || '指定地域'} ${SX_SCALE[settings.region.min] || ''}` : '';
+  el.innerHTML = `<div class="sx-sum__t">現在の通知設定<span class="en">STATUS</span></div>
+    ${pill(reg ? 'ok' : 'warn', 'プッシュ', reg ? '登録済み' : 'オフ')}
+    ${perm === 'denied' ? pill('bad', '通知の許可', 'ブロック中') : ''}
+    ${pill(settings.nation ? 'ok' : 'dim', '全国', settings.nation ? (SX_SCALE[settings.minScale] || '') : 'オフ')}
+    ${pill(rg ? 'ok' : 'dim', '地域別', rg || 'オフ')}
+    ${pill(settings.volcano ? 'ok' : 'dim', '噴火', settings.volcano ? 'オン' : 'オフ')}
+    ${pill('ok', '津波・緊急地震速報', '常に受信')}`;
+  const dot = $('#sxBadge'); if (dot) dot.hidden = reg && perm !== 'denied';
+}
+function initSettingsNav() {
+  const dlg = $('#settings'); if (!dlg || !$('.sx__nav')) return;
+  $$('.sx__tab').forEach(t => t.addEventListener('click', () => showSxTab(t.dataset.sx)));
+  // 行のどこをタップしてもオン/オフ（ボタン・入力欄・スイッチ本体は除く）
+  dlg.addEventListener('click', (e) => {
+    const row = e.target.closest('.sx-row[data-toggle]');
+    if (row && !e.target.closest('button, a, input, select, label')) { const i = row.querySelector('.switch input'); if (i && !i.disabled) i.click(); }
+    setTimeout(renderSettingsSummary, 60);                    // チップ・ボタン操作後に要約を更新
+  });
+  dlg.addEventListener('change', () => setTimeout(renderSettingsSummary, 60));
+  const v = $('#sxVer'); if (v) v.textContent = `v${APP_VER}`;
+  renderSettingsSummary();
+}
+
 /* ---------------- 起動 ---------------- */
 function init() {
   applyTheme();
@@ -1882,7 +1940,7 @@ function init() {
   on('#shakenClose', 'click', closeShaken);
   on('#shaken', 'close', () => clearInterval(shaken.iv));
   on('#shakenBody', 'click', (e) => { const b = e.target.closest('[data-sk]'); if (!b) return; closeShaken(); if (b.dataset.sk === 'tsunami') setTab('tsunami'); else { setTab('quake'); const f = $('.item'); if (f) f.click(); } });
-  initTabs(); initHome(); wakeRelay();
+  initTabs(); initHome(); initSettingsNav(); wakeRelay();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeRelay(); });
   syncFilterUI();
 
@@ -1923,7 +1981,7 @@ function init() {
   $('#statsClose').addEventListener('click', () => $('#stats').close());
   $('#stats').addEventListener('click', e => { if (e.target === $('#stats')) $('#stats').close(); });
   $('#statsPeriod').addEventListener('click', e => { const c = e.target.closest('.chip'); if (!c) return; statsDays = +c.dataset.v; openStats.redraw && 0; $$('#statsPeriod .chip').forEach(x => x.setAttribute('aria-checked', String(x === c))); const draw = () => ST.render($('#statsBody'), state.events, statsDays, Date.now(), { end: state.histEnd }); draw(); ensureLoadedUntil(Date.now() - statsDays * DAY, 20, draw).then(() => $('#stats').open && draw()); });
-  $('#alerts').addEventListener('click', e => { if (e.target.closest('[data-act="open-settings"]')) $('#btnSettings').click(); });
+  $('#alerts').addEventListener('click', e => { if (e.target.closest('[data-act="open-settings"]')) openSettingsTab('place'); });
 
   // 再生
   $('#btnPlay').addEventListener('click', () => (pb.on ? pbClose() : pbOpen()));
@@ -1948,7 +2006,7 @@ function init() {
   }
 }
 /* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
-const APP_VER = '2.5.0';
+const APP_VER = '2.7.0';
 async function fileProblems() {                      // 読み込めなかった js ファイルの原因（404 など）を調べる
   const out = [];
   for (const [f, ok] of [['js/geo.js', GEO_OK], ['js/stats.js', !!(window.Stats && window.Stats.render)]]) {
