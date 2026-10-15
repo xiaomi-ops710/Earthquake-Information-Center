@@ -69,6 +69,27 @@ function parseJst(s) {
 }
 const GRADE = { MajorWarning: ['大津波警報', 4], Warning: ['津波警報', 3], Watch: ['津波注意報', 2], Unknown: ['津波予報', 1] };
 
+/* ---------- 通知文（震度1〜4: 1回 / 震度5弱以上: ①緊急地震速報 → ②震度速報 → ③全情報 の3段階） ---------- */
+const MAJOR = 45;                                                         // 震度5弱
+const depthJp = (d) => (d === 0 ? '深さごく浅い' : d > 0 ? `深さ${d}km` : '');
+const hhmm = (s) => { const m = String(s || '').match(/(\d{1,2}):(\d{2})/); return m ? [m[1].padStart(2, '0'), m[2]] : null; };
+
+/** 震度1〜4: 「🚨地震　最大震度3　12：34頃発生」/「千葉県南東沖　M3.1　深さ10km」 */
+function minorText(ev) {
+  const t = hhmm(ev.timeStr);
+  return {
+    title: `🚨地震　最大震度${scaleTxt(ev.scale)}${t ? `　${t[0]}：${t[1]}頃発生` : ''}`,
+    body: [ev.name || '震源調査中', ev.mag >= 0 ? `M${ev.mag.toFixed(1)}` : '', depthJp(ev.depth)].filter(Boolean).join('　')
+  };
+}
+/** 震度5弱以上 ②震度速報 / ③全情報 */
+function majorText(ev, stage) {
+  const X = scaleTxt(ev.scale), name = ev.name || ev.topArea || '';
+  if (stage === 2) return { title: `⚠️緊急地震速報⚠️最大震度${X}`, body: `${name ? name + '　' : ''}引き続き強い揺れに警戒してください` };
+  const t = hhmm(ev.timeStr), spec = [ev.mag >= 0 ? `M${ev.mag.toFixed(1)}` : '', depthJp(ev.depth)].filter(Boolean).join(' ');
+  return { title: `⚠️${name ? name + 'で' : ''}最大震度${X}`, body: `${t ? `${t[0]}:${t[1]}頃に` : ''}${spec}${spec ? 'の' : ''}地震が発生しました` };
+}
+
 /* ---------- 地震情報(551) ---------- */
 class QuakeTracker {
   constructor() { this.events = []; }
@@ -86,7 +107,7 @@ class QuakeTracker {
     const name = h.name || '';
     let ev = this.events.find(x => Math.abs(x.t - t) < 60000 && (!x.name || !name || x.name === name));
     if (!ev) {
-      ev = { t, name: '', mag: -1, depth: -1, scale: -1, tsu: '', timeStr: '', ids: new Set(), prefMax: new Map(), nationDone: -1, regionDone: new Map(), tag: 'eq-' + String(e.time || '').slice(0, 16), seen: now };
+      ev = { t, name: '', mag: -1, depth: -1, scale: -1, tsu: '', timeStr: '', ids: new Set(), prefMax: new Map(), topArea: '', topScale: 0, nationDone: -1, regionDone: new Map(), stage: 0, sentScale: -1, tag: 'eq-' + String(e.time || '').slice(0, 16), seen: now };
       this.events.push(ev);
     }
     if (m.id != null) { if (ev.ids.has(m.id)) return []; ev.ids.add(m.id); }
@@ -100,32 +121,51 @@ class QuakeTracker {
     if (e.time) ev.timeStr = e.time;
     ev.scale = Math.max(ev.scale, scale);
     (Array.isArray(m.points) ? m.points : []).forEach(p => {
-      if (p && p.pref && Number.isFinite(p.scale) && (ev.prefMax.get(p.pref) || 0) < p.scale) ev.prefMax.set(p.pref, p.scale);
+      if (!p || !p.pref || !Number.isFinite(p.scale)) return;
+      if ((ev.prefMax.get(p.pref) || 0) < p.scale) ev.prefMax.set(p.pref, p.scale);
+      if (p.scale > ev.topScale || (p.scale === ev.topScale && p.isArea && !ev.topIsArea)) { ev.topScale = p.scale; ev.topArea = p.isArea && p.addr ? p.addr : p.pref; ev.topIsArea = !!p.isArea; }
     });
 
-    const depthTxt = ev.depth === 0 ? 'ごく浅い' : ev.depth > 0 ? `深さ${ev.depth}km` : '';
-    const body = [ev.name || '震源調査中', ev.mag >= 0 ? `M${ev.mag.toFixed(1)}` : '', depthTxt, hm(ev.timeStr) ? `${hm(ev.timeStr)}頃発生` : ''].filter(Boolean).join(' ');
-    const urgent = ev.scale >= 55 || ev.tsu === 'Warning';
-    const base = { tag: ev.tag, kind: '551', mid: String(m.id ?? ''), urgent, ttl: 600 };
+    const base = { tag: ev.tag, kind: '551', mid: String(m.id ?? ''), ttl: 600 };
     const out = [];
+    const topicsFor = (txt, urgent) => {
+      // 全国: しきい値 <= 最大震度 のトピック / 地域別: 都道府県ごとの最大震度で判定
+      for (const th of THRESHOLDS) if (th <= ev.scale) out.push({ ...base, ...txt, urgent, topic: topicNation(th), renotify: true });
+      for (const [pref, max] of ev.prefMax) {
+        const idx = PREFS.indexOf(pref) + 1; if (!idx) continue;
+        for (const th of THRESHOLDS) if (th <= max) out.push({ ...base, ...txt, urgent, topic: topicRegion(idx, th), renotify: true });
+      }
+    };
 
-    // 全国: 新たにしきい値を超えたトピックへ通知音あり / 既に通知済みで震源名が判明したトピックへは静かに更新
+    /* ===== 震度5弱以上: 段階通知 ===== */
+    if (ev.scale >= MAJOR) {
+      const detail = (m.issue && m.issue.type) === 'DetailScale';
+      const full = !!ev.name && ev.mag >= 0 && ev.depth >= 0;
+      const target = (full || detail) ? 3 : 2;                        // 一気に全情報が届いたときは②を飛ばして③
+      const upgraded = ev.scale > ev.sentScale && ev.stage >= 2;      // 震度が上方修正された
+      if (target > ev.stage || upgraded) {
+        topicsFor(majorText(ev, target), true);
+        ev.stage = Math.max(ev.stage, target); ev.sentScale = ev.scale;
+      }
+      ev.nationDone = Math.max(ev.nationDone, ev.scale);
+      return out;
+    }
+
+    /* ===== 震度1〜4: 1回の通知。震源名が分かったら通知済みの端末へ無音で更新 ===== */
+    const txt = minorText(ev), urgent = ev.tsu === 'Warning';
     for (const th of THRESHOLDS) {
       if (th > ev.scale) continue;
-      if (th > ev.nationDone) out.push({ ...base, topic: topicNation(th), title: `地震 最大震度${scaleTxt(ev.scale)}`, body, renotify: true });
-      else if (filled) out.push({ ...base, topic: topicNation(th), title: `地震 最大震度${scaleTxt(ev.scale)}`, body, renotify: false });
+      if (th > ev.nationDone) out.push({ ...base, ...txt, urgent, topic: topicNation(th), renotify: true });
+      else if (filled) out.push({ ...base, ...txt, urgent, topic: topicNation(th), renotify: false });
     }
     ev.nationDone = Math.max(ev.nationDone, ev.scale);
-
-    // 地域別: 都道府県ごとの最大震度で判定
     for (const [pref, max] of ev.prefMax) {
       const idx = PREFS.indexOf(pref) + 1; if (!idx) continue;
       const done = ev.regionDone.get(pref) || 0;
       for (const th of THRESHOLDS) {
         if (th > max) continue;
-        const title = `${pref}で震度${scaleTxt(max)}`;
-        if (th > done) out.push({ ...base, topic: topicRegion(idx, th), title, body, renotify: true });
-        else if (filled) out.push({ ...base, topic: topicRegion(idx, th), title, body, renotify: false });
+        if (th > done) out.push({ ...base, ...txt, urgent, topic: topicRegion(idx, th), renotify: true });
+        else if (filled) out.push({ ...base, ...txt, urgent, topic: topicRegion(idx, th), renotify: false });
       }
       ev.regionDone.set(pref, Math.max(done, max));
     }
@@ -158,18 +198,20 @@ class AlertTracker {
     if (m.test) return [];
     const id = (m.issue && m.issue.eventId) || m.id;
     const base = { topic: TOPIC_ALERT, tag: 'eew', kind: '556', mid: String(m.id ?? ''), ttl: 90 };
-    for (const [k, v] of this.eew) if (now - v > 3600e3) this.eew.delete(k);
+    for (const [k, v] of this.eew) if (now - v.t > 3600e3) this.eew.delete(k);
     if (m.cancelled) {
       if (!this.eew.has(id)) return [];
+      base.tag = this.eew.get(id).tag || base.tag;
       return [{ ...base, title: '緊急地震速報 取り消し', body: '先に発表された緊急地震速報（警報）は取り消されました', urgent: false, renotify: false }];
     }
     if (this.eew.has(id)) return [];
-    this.eew.set(id, now);
     const h = (m.earthquake && m.earthquake.hypocenter) || {};
-    const areas = [...new Set((m.areas || []).map(a => a.name).filter(Boolean))];
     const mx = Math.max(0, ...(m.areas || []).map(a => (SCALE_TXT[a.scaleTo] ? a.scaleTo : SCALE_TXT[a.scaleFrom] ? a.scaleFrom : 0)));
-    const body = `${h.name || '震源調査中'}${mx ? ` 予想最大震度${scaleTxt(mx)}` : ''} 強い揺れに警戒してください${areas.length ? '\n' + areas.slice(0, 6).join('、') + (areas.length > 6 ? ' ほか' : '') : ''}`;
-    return [{ ...base, title: '緊急地震速報（警報）', body, urgent: true, renotify: true }];
+    const name = h.name || '', lead = name ? `${name}で` : '';
+    const body = mx ? `${lead}最大震度${scaleTxt(mx)}　強い揺れに警戒してください` : `${lead}地震　強い揺れに警戒してください`;
+    base.tag = 'eq-' + String((m.earthquake && m.earthquake.originTime) || m.time || '').slice(0, 16);   // 後続の震度速報・全情報と同じ通知に置き換わる
+    this.eew.set(id, { t: now, tag: base.tag });
+    return [{ ...base, title: '⚠️緊急地震速報⚠️', body, urgent: true, renotify: true }];
   }
 }
 
