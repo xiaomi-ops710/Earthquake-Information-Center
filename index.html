@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>地震・津波速報</title>
 <meta name="theme-color" content="#050506">
-<meta name="app-version" content="2.5.0">
+<meta name="app-version" content="2.7.0">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -165,141 +165,223 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
   </div>
 </div>
 
-<dialog id="settings" class="dialog dialog--settings">
-  <form method="dialog" class="dialog__scroll"><div class="dialog__body">
-    <h2>設定</h2>
+<dialog id="settings" class="dialog dialog--settings" aria-label="設定">
+  <form method="dialog" class="sx">
+    <header class="sx__head">
+      <h2>設定<span class="en">SETTINGS</span></h2>
+      <button type="submit" class="icon-btn" aria-label="閉じる"><svg viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="sx__body">
+      <nav class="sx__nav" role="tablist" aria-label="設定のカテゴリ">
+        <button type="button" role="tab" class="sx__tab" data-sx="notify" aria-selected="true"><svg viewBox="0 0 24 24"><use href="#i-bell"/></svg><span><b>通知</b><small>NOTIFY</small></span><i id="sxBadge" class="sx__dot" hidden></i></button>
+        <button type="button" role="tab" class="sx__tab" data-sx="place" aria-selected="false"><svg viewBox="0 0 24 24"><use href="#i-pin"/></svg><span><b>場所</b><small>LOCATION</small></span></button>
+        <button type="button" role="tab" class="sx__tab" data-sx="alert" aria-selected="false"><svg viewBox="0 0 24 24"><use href="#i-volume"/></svg><span><b>警報・音</b><small>ALERT</small></span></button>
+        <button type="button" role="tab" class="sx__tab" data-sx="display" aria-selected="false"><svg viewBox="0 0 24 24"><use href="#i-tune"/></svg><span><b>表示</b><small>DISPLAY</small></span></button>
+        <button type="button" role="tab" class="sx__tab" data-sx="tools" aria-selected="false"><svg viewBox="0 0 24 24"><use href="#i-build"/></svg><span><b>診断・ツール</b><small>TOOLS</small></span></button>
+        <button type="button" role="tab" class="sx__tab" data-sx="about" aria-selected="false"><svg viewBox="0 0 24 24"><use href="#i-info"/></svg><span><b>アプリ情報</b><small>ABOUT</small></span></button>
+      </nav>
 
-    <div class="sec">通知</div>
-    <div class="row">
-      <div class="row__text"><b>ブラウザ通知</b><small id="permNote">新着時にこの端末へ通知します</small></div>
-      <label class="switch"><input type="checkbox" id="optNotify"><span></span></label>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>全国の通知</b><small>最大震度がしきい値以上の地震を通知</small></div>
-      <label class="switch"><input type="checkbox" id="optNation"><span></span></label>
-    </div>
-    <div class="row row--col" id="nationBox">
-      <div class="chips" id="minScale" role="radiogroup" aria-label="全国の最小震度">
-        <button type="button" class="chip" role="radio" data-v="10">震度1</button>
-        <button type="button" class="chip" role="radio" data-v="30">3</button>
-        <button type="button" class="chip" role="radio" data-v="40">4</button>
-        <button type="button" class="chip" role="radio" data-v="45">5弱</button>
-        <button type="button" class="chip" role="radio" data-v="55">6弱</button>
+      <div class="sx__panels">
+        <!-- ============ 通知 ============ -->
+        <section class="sx__panel" data-sx-panel="notify" role="tabpanel">
+          <p id="installNote" class="note" hidden>iPad/iPhoneで通知を受け取るには、Safariの共有ボタンから「ホーム画面に追加」してPWAとして起動してください。</p>
+          <div id="sxSummary" class="sx-sum" aria-live="polite"></div>
+
+          <div class="sx-card">
+            <h3 class="sx-card__t">受け取る方法<span class="en">CHANNEL</span></h3>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>プッシュ通知（FCM）</b><small id="pushNote">アプリを閉じていても即時に受信</small></div>
+              <label class="switch"><input type="checkbox" id="optPush" aria-label="プッシュ通知"><span></span></label>
+            </div>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>ブラウザ通知</b><small id="permNote">新着時にこの端末へ通知します</small></div>
+              <label class="switch"><input type="checkbox" id="optNotify" aria-label="ブラウザ通知"><span></span></label>
+            </div>
+          </div>
+
+          <div class="sx-card">
+            <h3 class="sx-card__t">地震の通知<span class="en">EARTHQUAKE</span></h3>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>全国の通知</b><small>最大震度がしきい値以上の地震を通知</small></div>
+              <label class="switch"><input type="checkbox" id="optNation" aria-label="全国の通知"><span></span></label>
+            </div>
+            <div class="sx-sub" id="nationBox">
+              <span class="sx-sub__l">通知する最小の震度</span>
+              <div class="chips" id="minScale" role="radiogroup" aria-label="全国の最小震度">
+                <button type="button" class="chip" role="radio" data-v="10">震度1</button>
+                <button type="button" class="chip" role="radio" data-v="30">3</button>
+                <button type="button" class="chip" role="radio" data-v="40">4</button>
+                <button type="button" class="chip" role="radio" data-v="45">5弱</button>
+                <button type="button" class="chip" role="radio" data-v="55">6弱</button>
+              </div>
+            </div>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>地域別通知</b><small>選んだ都道府県で揺れたときだけ通知</small></div>
+              <label class="switch"><input type="checkbox" id="optRegion" aria-label="地域別通知"><span></span></label>
+            </div>
+            <div class="sx-sub" id="regionBox">
+              <span class="sx-sub__l">都道府県と最小の震度</span>
+              <select id="regionPref" class="field" aria-label="通知する都道府県"></select>
+              <div class="chips" id="regionMin" role="radiogroup" aria-label="地域の最小震度">
+                <button type="button" class="chip" role="radio" data-v="10">震度1</button>
+                <button type="button" class="chip" role="radio" data-v="30">3</button>
+                <button type="button" class="chip" role="radio" data-v="40">4</button>
+                <button type="button" class="chip" role="radio" data-v="45">5弱</button>
+                <button type="button" class="chip" role="radio" data-v="55">6弱</button>
+              </div>
+              <p class="hint">全国と地域の両方がオンで条件を満たすと、同じ地震で通知が重なる場合があります。全国のしきい値は高め、地域は低めがおすすめです。</p>
+            </div>
+          </div>
+
+          <div class="sx-card">
+            <h3 class="sx-card__t">そのほかの通知<span class="en">OTHERS</span></h3>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>噴火速報・噴火警報</b><small>気象庁が発表したときにプッシュ通知（地震のしきい値とは別）</small></div>
+              <label class="switch"><input type="checkbox" id="optVolcano" aria-label="噴火速報・噴火警報の通知"><span></span></label>
+            </div>
+            <div class="sx-row">
+              <div class="sx-row__text"><b>津波・緊急地震速報</b><small>安全のため常に受信します（オフにはできません）</small></div>
+              <span class="pill pill--ok">常に受信</span>
+            </div>
+          </div>
+
+          <div class="sx-card">
+            <h3 class="sx-card__t">通知のテスト<span class="en">TEST</span></h3>
+            <div class="sx-row">
+              <div class="sx-row__text"><b>テスト通知</b><small>プッシュが届くか確認（アプリを閉じて確認すると確実）</small></div>
+              <button type="button" class="btn btn--tonal btn--sm" id="btnTest">送信</button>
+            </div>
+            <div class="sx-row">
+              <div class="sx-row__text"><b>配信経路テスト</b><small>実際の地震通知と同じ経路（サーバー→トピック→この端末）で確認。テスト通知は届くのに地震通知が来ないときはこちら</small></div>
+              <button type="button" class="btn btn--tonal btn--sm" id="btnTestTopic">送信</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 場所 ============ -->
+        <section class="sx__panel" data-sx-panel="place" role="tabpanel" hidden>
+          <div class="sx-card">
+            <h3 class="sx-card__t">あなたの場所<span class="en">HOME</span></h3>
+            <div class="sx-body">
+              <div id="homeText" class="sx-home">未設定です。現在地を取得するか、都道府県を選んでください。</div>
+              <div class="btns">
+                <button type="button" class="btn btn--tonal btn--sm" id="btnLocateSet">現在地を取得</button>
+                <select id="homePref" class="field" aria-label="都道府県を手動で選ぶ"></select>
+                <button type="button" class="btn btn--text btn--sm" id="btnHomeClear">解除</button>
+              </div>
+              <p class="hint">位置情報はこの端末の中だけに保存され、サーバーには送りません。震源までの距離表示と、緊急地震速報の予想震度・S波到達カウントダウン（推定）に使います。</p>
+            </div>
+          </div>
+          <div class="sx-card">
+            <h3 class="sx-card__t">見守り地点<span class="en">WATCH</span></h3>
+            <div class="sx-body">
+              <div id="placesList" class="places"></div>
+              <div class="btns">
+                <input id="placeName" class="field" maxlength="12" placeholder="名前（例: 実家）" aria-label="地点の名前">
+                <select id="placePref" class="field" aria-label="都道府県"></select>
+                <button type="button" class="btn btn--tonal btn--sm" id="btnPlaceAdd">追加</button>
+              </div>
+              <p class="hint">最大4件。ホーム画面に、各地点（都道府県）の直近24時間の揺れと、緊急地震速報の予想震度を表示します。プッシュ通知は「あなたの場所」と「地域別通知」の設定が対象です。</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 警報・音 ============ -->
+        <section class="sx__panel" data-sx-panel="alert" role="tabpanel" hidden>
+          <div class="sx-card">
+            <h3 class="sx-card__t">警報の出し方<span class="en">ALERT</span></h3>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>サウンド</b><small>新着・警報時に音を鳴らします</small></div>
+              <label class="switch"><input type="checkbox" id="optSound" aria-label="サウンド"><span></span></label>
+            </div>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>音声読み上げ</b><small>新着や警報を日本語で読み上げ（アプリ表示中のみ）</small></div>
+              <label class="switch"><input type="checkbox" id="optSpeak" aria-label="音声読み上げ"><span></span></label>
+            </div>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>全画面警報</b><small>緊急地震速報・震度6弱以上・津波警報で画面いっぱいに表示</small></div>
+              <label class="switch"><input type="checkbox" id="optFull" aria-label="全画面警報"><span></span></label>
+            </div>
+          </div>
+          <div class="sx-card">
+            <h3 class="sx-card__t">据え置き<span class="en">KIOSK</span></h3>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>画面を点灯したままにする</b><small>iPadを据え置きで使うときに便利</small></div>
+              <label class="switch"><input type="checkbox" id="optWake" aria-label="画面を点灯したままにする"><span></span></label>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 表示 ============ -->
+        <section class="sx__panel" data-sx-panel="display" role="tabpanel" hidden>
+          <div class="sx-card">
+            <h3 class="sx-card__t">外観<span class="en">APPEARANCE</span></h3>
+            <div class="sx-body">
+              <span class="sx-sub__l">テーマ</span>
+              <div class="chips" id="themeMode" role="radiogroup" aria-label="テーマ">
+                <button type="button" class="chip" role="radio" data-v="auto">自動</button>
+                <button type="button" class="chip" role="radio" data-v="light">ライト</button>
+                <button type="button" class="chip" role="radio" data-v="dark">ダーク</button>
+              </div>
+              <span class="sx-sub__l">配色</span>
+              <div class="swatches" id="swatches" role="radiogroup" aria-label="配色テーマ"></div>
+            </div>
+          </div>
+          <div class="sx-card">
+            <h3 class="sx-card__t">リアルタイム<span class="en">LIVE</span></h3>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>みんなの揺れ感知</b><small>P2Pユーザーの揺れ感知をリアルタイム表示（参考値）</small></div>
+              <label class="switch"><input type="checkbox" id="optShake" aria-label="みんなの揺れ感知"><span></span></label>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 診断・ツール ============ -->
+        <section class="sx__panel" data-sx-panel="tools" role="tabpanel" hidden>
+          <div class="sx-card">
+            <h3 class="sx-card__t">診断<span class="en">DIAGNOSTICS</span></h3>
+            <div class="sx-row">
+              <div class="sx-row__text"><b>接続診断</b><small>通知が届かないときの原因（許可・登録・サーバー・回線）を調べます</small></div>
+              <button type="button" class="btn btn--tonal btn--sm" id="btnDiag">実行</button>
+            </div>
+            <div id="diagOut" class="diag" hidden></div>
+          </div>
+          <div class="sx-card">
+            <h3 class="sx-card__t">ツール<span class="en">TOOLS</span></h3>
+            <div class="sx-row">
+              <div class="sx-row__text"><b>防災訓練</b><small>緊急地震速報の警報画面・音声・カウントダウンを体験します（実際の警報ではありません）</small></div>
+              <button type="button" class="btn btn--tonal btn--sm" id="btnDrill">開始</button>
+            </div>
+            <div class="sx-row">
+              <div class="sx-row__text"><b>履歴をCSVで保存</b><small>読み込み済みの履歴を書き出します（Excel / Numbers で開けます）</small></div>
+              <button type="button" class="btn btn--tonal btn--sm" id="btnCsv">保存</button>
+            </div>
+            <div class="sx-row">
+              <div class="sx-row__text"><b>キャッシュ消去</b><small>保存した履歴・設定の一部を消去します。表示が崩れたときに試してください</small></div>
+              <button type="button" class="btn btn--tonal btn--sm" id="btnClear">消去</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ アプリ情報 ============ -->
+        <section class="sx__panel" data-sx-panel="about" role="tabpanel" hidden>
+          <div class="sx-card">
+            <h3 class="sx-card__t">地震速報<span class="en">SEISMIC MONITOR</span></h3>
+            <div class="sx-body">
+              <p class="sx-p">P2P地震情報と気象庁の情報をもとに、地震・津波・噴火の情報をリアルタイムに表示するアプリです。</p>
+              <dl class="sx-dl">
+                <div><dt>バージョン</dt><dd id="sxVer">—</dd></div>
+                <div><dt>データ</dt><dd>P2P地震情報 / 気象庁 防災情報XML</dd></div>
+                <div><dt>地図</dt><dd>地理院タイル</dd></div>
+                <div><dt>地域コード</dt><dd>p2pquake/epsp-specifications</dd></div>
+              </dl>
+              <p class="hint">表示は参考情報です。避難などの判断は、気象庁・自治体の最新情報に従ってください。</p>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
-    <div class="row">
-      <div class="row__text"><b>地域別通知</b><small>選んだ都道府県で揺れたときだけ通知</small></div>
-      <label class="switch"><input type="checkbox" id="optRegion"><span></span></label>
-    </div>
-    <div class="row row--col" id="regionBox">
-      <select id="regionPref" class="field" aria-label="通知する都道府県"></select>
-      <div class="chips" id="regionMin" role="radiogroup" aria-label="地域の最小震度">
-        <button type="button" class="chip" role="radio" data-v="10">震度1</button>
-        <button type="button" class="chip" role="radio" data-v="30">3</button>
-        <button type="button" class="chip" role="radio" data-v="40">4</button>
-        <button type="button" class="chip" role="radio" data-v="45">5弱</button>
-        <button type="button" class="chip" role="radio" data-v="55">6弱</button>
-      </div>
-      <p class="hint">全国と地域の両方がオンで条件を満たすと、同じ地震で通知が重なる場合があります。全国のしきい値は高め、地域は低めがおすすめです。</p>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>プッシュ通知（FCM）</b><small id="pushNote">アプリを閉じていても即時に受信</small></div>
-      <label class="switch"><input type="checkbox" id="optPush"><span></span></label>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>噴火速報・噴火警報の通知</b><small>気象庁が噴火速報・噴火警報を発表したときにプッシュ通知（津波・緊急地震速報と同様、地震のしきい値とは別）</small></div>
-      <label class="switch"><input type="checkbox" id="optVolcano"><span></span></label>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>テスト通知</b><small>プッシュが届くか確認（アプリを閉じて確認すると確実）</small></div>
-      <button type="button" class="btn btn--text" id="btnTest">送信</button>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>配信経路テスト</b><small>実際の地震通知と同じ経路（サーバー→トピック→この端末）で届くか確認。上のテスト通知が届くのに地震通知が来ないときはこちら</small></div>
-      <button type="button" class="btn btn--text" id="btnTestTopic">送信</button>
-    </div>
-
-    <div class="sec">診断・ツール</div>
-    <div class="row">
-      <div class="row__text"><b>接続診断</b><small>通知が届かないときの原因（許可・登録・サーバー・回線）を調べます</small></div>
-      <button type="button" class="btn btn--text" id="btnDiag">実行</button>
-    </div>
-    <div id="diagOut" class="diag" hidden></div>
-    <div class="row">
-      <div class="row__text"><b>防災訓練</b><small>緊急地震速報の警報画面・音声・カウントダウンを体験します（実際の警報ではありません）</small></div>
-      <button type="button" class="btn btn--text" id="btnDrill">開始</button>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>履歴をCSVで保存</b><small>読み込み済みの履歴を書き出します（Excel / Numbers で開けます）</small></div>
-      <button type="button" class="btn btn--text" id="btnCsv">保存</button>
-    </div>
-
-    <div class="sec">あなたの場所</div>
-    <div class="homebox">
-      <div id="homeText">未設定です。現在地を取得するか、都道府県を選んでください。</div>
-      <div class="btns">
-        <button type="button" class="btn btn--tonal btn--sm" id="btnLocateSet">現在地を取得</button>
-        <select id="homePref" class="field" aria-label="都道府県を手動で選ぶ"></select>
-        <button type="button" class="btn btn--text btn--sm" id="btnHomeClear">解除</button>
-      </div>
-      <p class="hint">位置情報はこの端末の中だけに保存され、サーバーには送りません。地震の震源までの距離表示と、緊急地震速報のS波到達カウントダウン（推定）に使います。</p>
-    </div>
-
-    <div class="sec">見守り地点</div>
-    <div class="homebox">
-      <div id="placesList" class="places"></div>
-      <div class="btns">
-        <input id="placeName" class="field" maxlength="12" placeholder="名前（例: 実家）" aria-label="地点の名前">
-        <select id="placePref" class="field" aria-label="都道府県"></select>
-        <button type="button" class="btn btn--tonal btn--sm" id="btnPlaceAdd">追加</button>
-      </div>
-      <p class="hint">最大4件。ホーム画面に、各地点（都道府県）の直近24時間の揺れと、緊急地震速報の予想震度を表示します。プッシュ通知は「あなたの場所」と「地域別通知」の設定が対象です。</p>
-    </div>
-
-    <div class="sec">表示</div>
-    <div class="row row--col">
-      <div class="row__text"><b>テーマ</b></div>
-      <div class="chips" id="themeMode" role="radiogroup">
-        <button type="button" class="chip" role="radio" data-v="auto">自動</button>
-        <button type="button" class="chip" role="radio" data-v="light">ライト</button>
-        <button type="button" class="chip" role="radio" data-v="dark">ダーク</button>
-      </div>
-    </div>
-    <div class="row row--col">
-      <div class="row__text"><b>配色</b></div>
-      <div class="swatches" id="swatches" role="radiogroup" aria-label="配色テーマ"></div>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>みんなの揺れ感知</b><small>P2Pユーザーの揺れ感知をリアルタイム表示（参考値）</small></div>
-      <label class="switch"><input type="checkbox" id="optShake"><span></span></label>
-    </div>
-
-    <div class="sec">音・画面</div>
-    <div class="row">
-      <div class="row__text"><b>サウンド</b><small>新着・警報時に音を鳴らします</small></div>
-      <label class="switch"><input type="checkbox" id="optSound"><span></span></label>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>音声読み上げ</b><small>新着や警報を日本語で読み上げ（アプリ表示中のみ）</small></div>
-      <label class="switch"><input type="checkbox" id="optSpeak"><span></span></label>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>全画面警報</b><small>緊急地震速報・震度6弱以上・津波警報で画面いっぱいに表示</small></div>
-      <label class="switch"><input type="checkbox" id="optFull"><span></span></label>
-    </div>
-    <div class="row">
-      <div class="row__text"><b>画面を点灯したままにする</b><small>iPadを据え置きで使うときに便利</small></div>
-      <label class="switch"><input type="checkbox" id="optWake"><span></span></label>
-    </div>
-
-    <p id="installNote" class="note" hidden>iPad/iPhoneで通知を受け取るには、Safariの共有ボタンから「ホーム画面に追加」してPWAとして起動してください。</p>
-
-    <div class="dialog__actions">
-      <button type="button" class="btn btn--text" id="btnClear">キャッシュ消去</button>
-      <button type="submit" class="btn btn--filled">閉じる</button>
-    </div>
-    <p class="credit">データ: P2P地震情報 / 地図: 地理院タイル / 地域コード: p2pquake/epsp-specifications</p>
-  </div></form>
+  </form>
 </dialog>
 
 <dialog id="stats" class="dialog dialog--full" aria-label="統計">
@@ -355,6 +437,10 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2.5 12.5h4l2.4-6.5 4.2 12 2.6-7.2 1.4 1.7h4.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></symbol>
+    <symbol id="i-build" viewBox="0 0 24 24"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
     <symbol id="i-map" viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></symbol>
