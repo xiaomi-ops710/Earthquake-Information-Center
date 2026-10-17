@@ -1,5 +1,5 @@
 /**
- * P2P地震情報 WebSocket → FCM 中継サーバー (v2)
+ * P2P地震情報 WebSocket → FCM 中継サーバー (v4)
  *  - wss://api.p2pquake.net/v2/ws を常時購読し、受信した瞬間に FCM トピックへ送信
  *  - POST /subscribe   { token, nation, region:{pref,name,min}, prev }  購読の登録・差し替え
  *  - POST /unsubscribe { token, prev }
@@ -18,7 +18,11 @@
  *   PORT                      既定 8080
  *   KEEPALIVE_URL             自分自身の公開URL（Render は RENDER_EXTERNAL_URL を自動設定）。10分ごとに /healthz を叩いてスリープを防ぐ
   *
- * ※ このファイルは build.mjs が server.src.js + logic.js + volcano.js から自動生成した単体版です。直接編集しないでください。
+ * ※ このファイルは単体版です（server.src.js / volcano.js / build.mjs はリポジトリに無いため、この server.js を直接編集します）。
+ *
+ * 環境変数（任意・接続制限への対応。既定値のままで可）:
+ *   RETRY_MAX_MS 再接続の最大待ち時間 既定 120000 ／ RATE_LIMIT_WAIT_MS 429 のときの最短待ち時間 既定 30000
+ *   FALLBACK_AFTER_MS WebSocket が切れてから REST 補完を始めるまで 既定 45000 ／ FALLBACK_EVERY_MS REST 補完の間隔 既定 30000
  */
 import http from 'node:http';
 import WebSocket from 'ws';
@@ -288,13 +292,16 @@ class VolcanoTracker {
 
 
 
-const SERVER_VERSION = 3;
+const SERVER_VERSION = 4;
 
 const WS_URL = process.env.P2P_WS_URL || 'wss://api.p2pquake.net/v2/ws';
 const API_BASE = process.env.P2P_API || 'https://api.p2pquake.net/v2';
 const toOrigin = (v) => { try { return new URL(v.trim()).origin; } catch { return v.trim().replace(/\/+$/, ''); } };
 const ALLOWED = (process.env.ALLOWED_ORIGIN || '*').split(',').map(s => s.trim()).filter(Boolean).map(s => (s === '*' ? s : toOrigin(s)));
 const PORT = Number(process.env.PORT || 8080);
+const numEnv = (k, d) => { const v = Number(process.env[k]); return Number.isFinite(v) && v > 0 ? v : d; };
+const RETRY_MAX_MS = numEnv('RETRY_MAX_MS', 120e3), RATE_LIMIT_WAIT_MS = numEnv('RATE_LIMIT_WAIT_MS', 30e3);
+const FALLBACK_AFTER_MS = numEnv('FALLBACK_AFTER_MS', 45e3), FALLBACK_EVERY_MS = numEnv('FALLBACK_EVERY_MS', 30e3);
 
 admin.initializeApp(process.env.FIREBASE_SERVICE_ACCOUNT
   ? { credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) }
@@ -357,15 +364,28 @@ async function catchUp(maxAge = 5 * 60e3) {
 
 /* ---------- P2P WebSocket（自動再接続 + ハートビート） ---------- */
 let retry = 0, everConnected = false;
+let wsOpen = false, wsDownSince = Date.now(), last429 = 0, lastFallback = 0, fallbackRuns = 0;   // 接続状態（/healthz と REST 補完に使う）
+const nextWait = (rateLimited) => {              // 再接続の待ち時間: 指数的に最大 RETRY_MAX_MS まで。429 のときは最低 RATE_LIMIT_WAIT_MS。どちらも揺らぎを加える
+  let wait = Math.min(RETRY_MAX_MS, 1000 * 2 ** Math.min(retry++, 10));
+  if (rateLimited) wait = Math.max(wait, RATE_LIMIT_WAIT_MS);
+  return Math.round(wait + Math.random() * Math.min(15e3, wait * 0.2 + 500));
+};
+/* WebSocket が FALLBACK_AFTER_MS 以上切れたら、FALLBACK_EVERY_MS ごとに /history を取得して未送信の分を通知する（dispatch が重複を除く） */
+setInterval(() => {
+  if (wsOpen || Date.now() - wsDownSince < FALLBACK_AFTER_MS || Date.now() - lastFallback < FALLBACK_EVERY_MS) return;
+  lastFallback = Date.now(); fallbackRuns++; console.log('[fallback] websocket down, polling REST history');
+  catchUp(5 * 60e3);
+}, Math.max(50, Math.min(5e3, FALLBACK_EVERY_MS / 2)));
 function connect() {
-  const ws = new WebSocket(WS_URL);
+  const ws = new WebSocket(WS_URL, { handshakeTimeout: 10e3 });   // 接続試行が終わらないまま止まるのを防ぐ
   let alive = Date.now();
   const beat = setInterval(() => {
     if (Date.now() - alive > 90e3) { console.log('[ws] heartbeat timeout'); ws.terminate(); return; }
     try { ws.ping(); } catch { /* noop */ }
   }, 30e3);
+  let rateLimited = false;
   ws.on('open', () => {
-    retry = 0; alive = Date.now(); console.log('[ws] connected');
+    retry = 0; alive = Date.now(); wsOpen = true; console.log('[ws] connected');
     // 再接続時は5分、起動直後（スリープ復帰・再デプロイ）は8分前までの取りこぼしを補完。起動直後の再送は端末側で同じ tag に置換される
     catchUp(everConnected ? 5 * 60e3 : 8 * 60e3); everConnected = true;
   });
@@ -376,11 +396,12 @@ function connect() {
   });
   ws.on('pong', () => { alive = Date.now(); });
   ws.on('ping', () => { alive = Date.now(); });
-  ws.on('error', (e) => console.error('[ws] error', e.message));
+  ws.on('error', (e) => { console.error('[ws] error', e.message); if (/\b429\b/.test(String(e && e.message))) { rateLimited = true; last429 = Date.now(); } });
   ws.on('close', () => {
     clearInterval(beat);
-    const wait = Math.min(30000, 1000 * 2 ** retry++);
-    console.log(`[ws] closed, retry in ${wait}ms`);
+    if (wsOpen || !wsDownSince) wsDownSince = Date.now(); wsOpen = false;
+    const wait = nextWait(rateLimited);
+    console.log(`[ws] closed, retry in ${wait}ms${rateLimited ? ' (429: rate limited)' : ''}`);
     setTimeout(connect, wait);
   });
 }
@@ -450,7 +471,10 @@ http.createServer(async (req, res) => {
   const path = (req.url || '').split('?')[0];
   if (req.method === 'OPTIONS') return reply(204, {});
   if (path === '/healthz' || path === '/') return reply(200, {
-    ok: true, v: SERVER_VERSION, ws: everConnected, up: Math.round(process.uptime()),
+    ok: true, v: SERVER_VERSION, ws: wsOpen, wsEver: everConnected, up: Math.round(process.uptime()),
+    wsDownSec: wsOpen ? 0 : Math.round((Date.now() - wsDownSince) / 1000), wsRetry: retry,
+    last429Ago: last429 ? Math.round((Date.now() - last429) / 1000) : null,
+    restFallback: { active: !wsOpen && Date.now() - wsDownSince >= FALLBACK_AFTER_MS, runs: fallbackRuns, lastAgo: lastFallback ? Math.round((Date.now() - lastFallback) / 1000) : null },
     lastWsMsgAgo: lastWsMsg ? Math.round((Date.now() - lastWsMsg) / 1000) : null,
     lastPush: lastPush ? { agoSec: Math.round((Date.now() - lastPush.t) / 1000), topic: lastPush.topic, title: lastPush.title } : null,
     volcano: { ok: !volcanoState.error, items: volcanoState.items.length }
