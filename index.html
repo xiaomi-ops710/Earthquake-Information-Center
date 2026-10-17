@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>地震・津波速報</title>
 <meta name="theme-color" content="#050506">
-<meta name="app-version" content="2.7.0">
+<meta name="app-version" content="2.8.1">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -299,6 +299,10 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
               <label class="switch"><input type="checkbox" id="optSpeak" aria-label="音声読み上げ"><span></span></label>
             </div>
             <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>S波到達の推定表示</b><small>緊急地震速報のカウントダウンと、地図・監視モニタのP/S波の同心円。気象庁の予報ではありません。広く公開する場合は気象業務法の観点を確認してください</small></div>
+              <label class="switch"><input type="checkbox" id="optWave" aria-label="S波到達の推定表示"><span></span></label>
+            </div>
+            <div class="sx-row" data-toggle>
               <div class="sx-row__text"><b>全画面警報</b><small>緊急地震速報・震度6弱以上・津波警報で画面いっぱいに表示</small></div>
               <label class="switch"><input type="checkbox" id="optFull" aria-label="全画面警報"><span></span></label>
             </div>
@@ -403,7 +407,8 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
   <div class="mon">
     <section class="mon__scope" aria-label="揺れの感知マップ">
       <canvas id="monCanvas"></canvas>
-      <div class="mon__legend" aria-hidden="true"><span class="lg"><i style="--c:#6db3f2"></i>1</span><span class="lg"><i style="--c:#4fd1a0"></i>2–4</span><span class="lg"><i style="--c:#ffe14d"></i>5–9</span><span class="lg"><i style="--c:#ff9f2e"></i>10–19</span><span class="lg"><i style="--c:#ff4538"></i>20+</span><small>件/分</small></div>
+      <div class="mon__replay" aria-label="直近10分の再生"><button id="monPlay" type="button" class="btn btn--tonal btn--sm">▶ 再生</button><input id="monReplay" type="range" min="-600" max="0" step="5" value="0" aria-label="再生位置（直近10分）"><b id="monReplayTxt">ライブ</b><button id="monLive" type="button" class="btn btn--text btn--sm">ライブへ</button></div>
+      <div class="mon__legend" aria-hidden="true"><span class="lg"><i style="--c:#6db3f2"></i>1</span><span class="lg"><i style="--c:#4fd1a0"></i>2–4</span><span class="lg"><i style="--c:#ffe14d"></i>5–9</span><span class="lg"><i style="--c:#ff9f2e"></i>10–19</span><span class="lg"><i style="--c:#ff4538"></i>20+</span><small>件/分</small><span class="lg lg--g"><i style="--c:#ff4538"></i>A<i style="--c:#ff9f2e"></i>B<i style="--c:#ffe14d"></i>C<i style="--c:#6db3f2"></i>D</span><small>P2P評価</small></div>
     </section>
     <aside class="mon__side">
       <div class="mon__clock"><time id="monClock">--:--:--</time><span class="en">JST</span><span id="monSurge" class="pill pill--ok">平常</span></div>
@@ -412,6 +417,11 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
         <div class="tile"><small>感知（直近10秒）</small><b id="monN10">0</b><span>件</span></div>
         <div class="tile"><small>最多の地域</small><b id="monTop" class="tile__txt">—</b><span id="monTopN"></span></div>
       </div>
+      <div class="card mon__card"><h3>感知の評価<span class="en">P2P CONFIDENCE</span></h3>
+        <div id="monGauge" class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="感知の信頼度"><i id="monGaugeBar"></i><b id="monGaugeTxt">—</b></div>
+        <small id="monGaugeSub" class="gauge__sub">評価なし</small>
+        <h4 class="mon__h4">報告の多い都道府県</h4><ul id="monPrefs" class="mon__prefs"></ul></div>
+      <div class="card mon__card"><h3>経過<span class="en">TIMELINE</span></h3><ul id="monTl" class="mon__tl"></ul></div>
       <div class="card mon__card"><h3>感知数の推移<span class="en">LAST 10 MIN</span></h3><canvas id="monSpark" class="mon__spark"></canvas></div>
       <div class="card mon__card mon__states">
         <div><span>緊急地震速報</span><span id="monEew" class="pill pill--ok">発表なし</span></div>
@@ -421,6 +431,7 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
       </div>
       <div class="card mon__card"><h3>直近の地震<span class="en">LATEST</span></h3><ul id="monLatest" class="mon__latest"></ul></div>
       <div class="card mon__card"><h3>受信ログ<span class="en">FEED</span></h3><ul id="monFeed" class="mon__feed"></ul></div>
+      <div class="card mon__card kmlinks"><h3>公式の強震モニタ<span class="en">OFFICIAL KMONI</span></h3><div><a href="http://www.kmoni.bosai.go.jp/" target="_blank" rel="noopener noreferrer">防災科研 強震モニタ</a><a href="https://typhoon.yahoo.co.jp/weather/jp/earthquake/kyoshin/" target="_blank" rel="noopener noreferrer">Yahoo!天気・災害 強震モニタ</a></div><p class="hint">強震モニタの画像は、利用条件により本アプリでは取り込みません（画像の複製・再配布、画像の色から数値を取り出す加工は行いません）。公式サイトでご確認ください。</p></div>
       <p class="hint">感知は P2P 地震情報の利用者が端末で揺れを検知した参考情報で、震度ではありません。この画面を含め、アプリを開いている間に受信した分だけを表示します。</p>
     </aside>
   </div>
