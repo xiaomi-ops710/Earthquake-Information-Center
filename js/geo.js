@@ -33,7 +33,11 @@
       if (f.length < 2 || !/^\d+$/.test(f[0])) continue;                // ヘッダー行などは読み飛ばす
       const code = +f[0];
       let pref = null, name = '', lat = NaN, lon = NaN;
-      for (const x of f.slice(1)) {
+      if (f.length >= 6) {                                              // 公式の列順を優先: コード, 地域名, 都道府県名, 地方名, 緯度, 経度
+        const p0 = findPref(f[2]), la = parseFloat(f[4]), lo = parseFloat(f[5]);
+        if (p0 && la > 20 && la < 50 && lo > 120 && lo < 155) { pref = p0; name = f[1]; lat = la; lon = lo; }
+      }
+      if (!pref) for (const x of f.slice(1)) {                          // 予備: 列順が違う表は内容から自動判別
         if (!pref && findPref(x)) { pref = findPref(x); continue; }
         if (/^-?\d+\.\d+$/.test(x)) { const v = +x; if (v > 20 && v < 50 && Number.isNaN(lat)) lat = v; else if (v > 120 && v < 155 && Number.isNaN(lon)) lon = v; continue; }
         if (!name && x && !/^\d+$/.test(x)) name = x;

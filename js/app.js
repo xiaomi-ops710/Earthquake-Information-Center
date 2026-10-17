@@ -37,7 +37,7 @@ const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); retur
 /* ---------------- 設定 ---------------- */
 const defaults = {
   notify: true, sound: true, speak: false, wake: false, shake: true,
-  fullAlert: true, kiosk: false, kioskDim: false,
+  fullAlert: true, waveEst: true, kiosk: false, kioskDim: false,
   nation: true, minScale: 30,
   volcano: true, prep: {}, places: [], tab: 'home',
   region: { on: false, pref: 0, min: 30 },
@@ -439,7 +439,7 @@ function renderAlerts() {
         <div><small>深さ</small><b>${dep}</b></div>
         <div class="eewstat__max"><small>予想最大震度</small><b>${mx ? esc(mx.plain) : '—'}</b></div>
       </div>
-      <div class="eewmain">${fcTile}${settings.home ? '<div class="cd" id="eewCd"></div>' : '<div class="cd"><span class="lbl">「設定」で現在地を登録すると、S波到達までのカウントダウンを表示します</span></div>'}</div>
+      <div class="eewmain">${fcTile}${!settings.waveEst ? '' : settings.home ? '<div class="cd" id="eewCd"></div>' : '<div class="cd"><span class="lbl">「設定」で現在地を登録すると、S波到達までのカウントダウンを表示します</span></div>'}</div>
       ${areas.length ? `<details><summary>対象地域 ${areas.length}</summary><ul>${areas.slice(0, 40).map(a => `<li>${esc(a)}</li>`).join('')}</ul></details>` : ''}</div>`;
   }
   const ts = state.tsunami;
@@ -610,7 +610,7 @@ function eewCalc(m) {
   return { dist, rem: (origin + r / VS * 1000 - Date.now()) / 1000 };
 }
 function updateCd() {
-  if (!state.eew || !settings.home) return;
+  if (!state.eew || !settings.home || !settings.waveEst) return;
   const els = [$('#eewCd'), $('#ovCd'), ...$$('#kAlerts .cd')].filter(Boolean);
   if (!els.length) return;
   const put = (cls, html) => els.forEach(el => { el.className = cls; el.innerHTML = html; });
@@ -652,9 +652,14 @@ function applyEew(m) {
   const lat = Number(h.latitude), lon = Number(h.longitude);
   if (validCoord(lat, lon) && map) {
     if (isNew) map.flyTo([lat, lon], 6, { duration: 1 });
-    let origin = parseJst(m.earthquake.originTime); if (!Number.isFinite(origin)) origin = Date.now();
-    startWaves({ lat, lon, depth: h.depth > 0 ? h.depth : 10, origin, live: true, maxKm: 900 });
+    if (settings.waveEst) eewWaves(m); else stopWaves();
   }
+}
+function eewWaves(m) {                           // P/S波の同心円（地図）。「S波到達の推定表示」がオンのときだけ
+  const h = (m.earthquake && m.earthquake.hypocenter) || {}, lat = Number(h.latitude), lon = Number(h.longitude);
+  if (!map || !validCoord(lat, lon)) return;
+  let origin = parseJst(m.earthquake.originTime); if (!Number.isFinite(origin)) origin = Date.now();
+  startWaves({ lat, lon, depth: h.depth > 0 ? h.depth : 10, origin, live: true, maxKm: 900 });
 }
 
 /* ---------------- 全画面警報 ---------------- */
@@ -665,7 +670,7 @@ function showOverlay({ tone = 'eq', kind, title, sub = '', badge = null, eew = f
   $('#ovKind').textContent = kind; $('#ovTitle').textContent = title; $('#ovSub').textContent = sub;
   const b = $('#ovBadge');
   if (badge) { b.hidden = false; b.style.setProperty('--c', badge.bg); b.style.setProperty('--fg', badge.fg); b.innerHTML = `<span>${badge.t}</span>`; } else b.hidden = true;
-  $('#ovCd').hidden = !(eew && settings.home);
+  $('#ovCd').hidden = !(eew && settings.home && settings.waveEst);
   ov.hidden = false; clearTimeout(ovTimer); ovTimer = setTimeout(hideOverlay, eew ? 120000 : 60000);
   if (eew) updateCd();
   $('#ovClose').focus({ preventScroll: true });
@@ -775,6 +780,7 @@ function handle(m, live, catchup) {
     case 552: applyTsunami(m, { live: asLive(30 * 60e3) }); break;
     case 556: if (live) applyEew(m); break;
     case 561: if (live) applyShake(m); break;
+    case 9611: if (live) monEval(m); break;
     default: break;
   }
 }
@@ -782,6 +788,7 @@ function handle(m, live, catchup) {
 /* ---------------- REST: 履歴 ---------------- */
 const idCount = () => state.events.reduce((n, e) => n + e.ids.length, 0);
 async function fetchHistory(silent) {
+  lastPoll = Date.now();
   try {
     const [qr, tr] = await Promise.all([
       fetch(`${CFG.apiBase}/history?codes=551&limit=100`, { cache: 'no-store' }),
@@ -827,32 +834,90 @@ async function ensureLoadedUntil(ms, maxPages = 15, onProgress) {
 }
 
 /* ---------------- WebSocket ---------------- */
-let ws = null, retry = 0, retryTimer = null, everOpen = false;
+let ws = null, retry = 0, retryTimer = null, retryAt = 0, everOpen = false, limitNoticed = false, lastPoll = 0, lastEewPoll = 0;
+let lastWsAct = 0, downSince = 0, downNoticed = false, hiddenAt = 0;
+const CONNECT_TIMEOUT = 10000;                   // 接続試行がこの時間で終わらなければ失敗扱いにして再試行（「接続中」のまま止まるのを防ぐ）
 function setStatus(s, text) {
   state.status = s; const el = $('#status'); el.dataset.state = s; $('#statusText', el).textContent = text;
+  el.title = s === 'live' ? 'ライブ接続中（タップで状態を表示）' : `未接続${retry ? `（再試行 ${retry} 回目）` : ''} ・ タップで今すぐ再接続`;
+  if (s === 'live') { downSince = 0; downNoticed = false; } else if (!downSince) downSince = Date.now();
   const k = $('#kStatus'); if (k) { k.dataset.state = s; $('.t', k).textContent = text; }
 }
 function connect() {
-  clearTimeout(retryTimer);
+  clearTimeout(retryTimer); retryAt = 0;
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
   if (!navigator.onLine) { setStatus('offline', 'オフライン'); return; }
   setStatus('connecting', retry ? '再接続中' : '接続中');
-  try { ws = new WebSocket(CFG.wsUrl); } catch { return schedule(); }
-  ws.onopen = () => { setStatus('live', 'ライブ'); retry = 0; if (everOpen) fetchHistory(true); everOpen = true; };
-  ws.onmessage = (ev) => { try { const d = JSON.parse(ev.data); (Array.isArray(d) ? d : [d]).forEach(m => handle(m, true)); } catch { /* ignore */ } };
-  ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
-  ws.onclose = () => { setStatus(navigator.onLine ? 'connecting' : 'offline', navigator.onLine ? '再接続中' : 'オフライン'); schedule(); };
+  let sock;
+  try { sock = new WebSocket(CFG.wsUrl); } catch { return schedule(); }
+  ws = sock;
+  const fail = () => {                           // 古い接続（forceReconnect で置き換え済み）の通知は無視する
+    clearTimeout(ct);
+    if (ws !== sock) return;
+    ws = null; try { sock.close(); } catch { /* noop */ }
+    setStatus(navigator.onLine ? 'connecting' : 'offline', navigator.onLine ? '再接続中' : 'オフライン'); schedule();
+  };
+  const ct = setTimeout(() => { if (sock.readyState === 0) fail(); }, CONNECT_TIMEOUT);
+  sock.onopen = () => { if (ws !== sock) return; clearTimeout(ct); lastWsAct = Date.now(); setStatus('live', 'ライブ'); retry = 0; limitNoticed = false; if (everOpen) fetchHistory(true); everOpen = true; };
+  sock.onmessage = (ev) => { if (ws !== sock) return; lastWsAct = Date.now(); try { const d = JSON.parse(ev.data); (Array.isArray(d) ? d : [d]).forEach(m => handle(m, true)); } catch { /* ignore */ } };
+  sock.onerror = () => { try { sock.close(); } catch { /* noop */ } };
+  sock.onclose = fail;
 }
-function schedule() { clearTimeout(retryTimer); retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** retry++) + Math.random() * 500); }
-addEventListener('online', () => { retry = 0; connect(); fetchHistory(true); });
+function forceReconnect() {                      // 今ある接続を捨てて、待たずにつなぎ直す（見かけだけ open の死んだ接続にも効く）
+  clearTimeout(retryTimer); retry = 0; limitNoticed = false;
+  const old = ws; ws = null; if (old) { try { old.close(); } catch { /* noop */ } }
+  connect();
+}
+function schedule() {                            // P2P は 1 つの IP アドレスにつき WebSocket 2 本まで。失敗が続いたら間隔を最大120秒＋揺らぎまで広げる
+  clearTimeout(retryTimer);
+  const base = Math.min(120000, 1000 * 2 ** Math.min(retry++, 10)), wait = base + Math.random() * Math.min(15000, base * 0.3 + 500);
+  if (retry >= 5) {
+    setStatus('connecting', '再接続待機中');
+    if (!limitNoticed) { limitNoticed = true; toast('接続が続けて失敗しています。P2P地震情報は、同じWi-Fiで3台以上は接続できません。他の端末のアプリを閉じてください'); }
+  }
+  retryAt = Date.now() + wait; retryTimer = setTimeout(connect, wait);
+}
+async function pollEewRest() {                   // WebSocket が切れている間も、直近の緊急地震速報を REST で拾う
+  lastEewPoll = Date.now();
+  try {
+    const r = await fetch(`${CFG.apiBase}/history?codes=556&limit=3`, { cache: 'no-store' }); if (!r.ok) return;
+    (await r.json()).slice().reverse().forEach(m => {
+      if (!m || m.cancelled || m.test) return;
+      let t = parseJst(m.earthquake && m.earthquake.originTime); if (!Number.isFinite(t)) t = parseJst(m.time);
+      if (Number.isFinite(t) && Date.now() - t >= 0 && Date.now() - t < 60000) applyEew(m);
+    });
+  } catch { /* 次の周期で再試行 */ }
+}
+function onStatusTap() {
+  if (state.status === 'live') toast(`ライブ接続中（最終受信 ${lastWsAct ? rel(lastWsAct) : '—'}）`);
+  else { toast('今すぐ再接続します…'); forceReconnect(); fetchHistory(true); }
+}
+{ const st = $('#status'); if (st) st.addEventListener('click', onStatusTap); const ml = $('#monLink'); if (ml) ml.addEventListener('click', onStatusTap); }
+addEventListener('online', () => { forceReconnect(); fetchHistory(true); });
 addEventListener('offline', () => setStatus('offline', 'オフライン'));
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
-  if (!ws || ws.readyState > 1) { retry = 0; connect(); }
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0;
+  if (!ws || ws.readyState > 1 || away > 30000) forceReconnect();   // iPad は裏に回ると接続が止まる。戻ったらつなぎ直す
   fetchHistory(true); wakeLock();
 });
 setInterval(() => $$('[data-rel]').forEach(el => { el.textContent = rel(+el.dataset.rel); }), 30000);
-setInterval(() => { if (!document.hidden && navigator.onLine) fetchHistory(true); }, 60000);   // 保険のポーリング
+setInterval(() => {                              // 見張り: 接続試行の取りこぼし・予約切れの復旧、切断中の補完、長時間無通信の再接続
+  if (!navigator.onLine) return;
+  const now = Date.now(), open = ws && ws.readyState === 1;
+  if (open) { if (!document.hidden && lastWsAct && now - lastWsAct > 20 * 60e3) { lastWsAct = now; forceReconnect(); } return; }
+  if (!(ws && ws.readyState === 0) && (!retryAt || now > retryAt + 8000)) connect();
+  if (document.hidden) return;
+  if (now - lastPoll > 20000) fetchHistory(true);
+  if (now - lastEewPoll > 20000) pollEewRest();
+  if (downSince && now - downSince > 60000 && !downNoticed) { downNoticed = true; toast('接続が切れています。履歴と緊急地震速報を20秒ごとに確認しています。上部の接続表示をタップで再接続'); }
+}, 10000);
+setInterval(() => {                              // 保険のポーリング: WebSocket が生きている間は 5 分に 1 回
+  if (document.hidden || !navigator.onLine) return;
+  if (ws && ws.readyState === 1 && Date.now() - lastPoll < 300000) return;
+  if (!(ws && ws.readyState === 1)) return;      // 切れている間は上の見張り（20秒ごと）が担当
+  fetchHistory(true);
+}, 60000);
 
 /* ---------------- 表示切替 ---------------- */
 function setView(v) {
@@ -1053,7 +1118,7 @@ function syncSettingsUI() {
   $('#optNotify').checked = settings.notify && 'Notification' in window && Notification.permission === 'granted';
   $('#optSound').checked = settings.sound; $('#optSpeak').checked = settings.speak && 'speechSynthesis' in window; $('#optSpeak').disabled = !('speechSynthesis' in window);
   $('#optWake').checked = settings.wake; $('#optWake').disabled = !('wakeLock' in navigator);
-  $('#optShake').checked = settings.shake; $('#optFull').checked = settings.fullAlert;
+  $('#optShake').checked = settings.shake; $('#optFull').checked = settings.fullAlert; $('#optWave').checked = settings.waveEst;
   $('#optPush').checked = settings.push; $('#optPush').disabled = !pushConfigured();
   { const v = $('#optVolcano'); if (v) v.checked = !!settings.volcano; }
   $('#btnTest').disabled = !settings.push;
@@ -1118,6 +1183,10 @@ function initSettingsUI() {
   $('#optWake').onchange = e => { settings.wake = e.target.checked; saveSettings(); if (settings.wake) wakeLock(); else wakeSentinel && wakeSentinel.release().catch(() => {}); };
   $('#optFull').onchange = e => { settings.fullAlert = e.target.checked; saveSettings(); if (settings.fullAlert) showOverlay({ tone: 'eq', kind: 'テスト表示', title: '全画面警報の表示テストです', sub: '実際の警報時は、このように画面いっぱいに表示されます', badge: scaleInfo(55) }); };
   { const v = $('#optVolcano'); if (v) v.onchange = e => { settings.volcano = e.target.checked; saveSettings(); syncPushSoon(); toast(settings.volcano ? '噴火速報・噴火警報をプッシュ通知します' : '噴火のプッシュ通知をオフにしました'); }; }
+  $('#optWave').onchange = e => {
+    settings.waveEst = e.target.checked; saveSettings();
+    if (state.eew) { if (settings.waveEst) eewWaves(state.eew.msg); else stopWaves(); renderAlerts(); updateCd(); const ov = $('#ovCd'); if (ov) ov.hidden = !(settings.waveEst && settings.home && $('#overlay').dataset.eew); }
+  };
   $('#optShake').onchange = e => { settings.shake = e.target.checked; saveSettings(); if (settings.shake) initShake(); else shakeSweep(); };
   $('#optPush').onchange = async (e) => {
     e.target.disabled = true; if (e.target.checked) toast('プッシュ通知を登録中…（中継サーバー起動待ちで最大1分）');
@@ -1157,7 +1226,8 @@ async function openStats() {
 /* =========================================================
    リアルタイム監視モニタ（P2P 地震感知情報 561 + 地震情報 + 緊急地震速報）
    ========================================================= */
-const mon = { det: [], feed: [], count: 0, lastMsg: 0, open: false, raf: 0, lastDom: 0, areaLoading: false, latest: null };
+const mon = { det: [], feed: [], count: 0, lastMsg: 0, open: false, raf: 0, lastDom: 0, areaLoading: false, latest: null,
+  hist: [], tl: [], startedKey: '', notified: false, replay: null, playing: false, lastFrame: 0 };   // hist: 9611 の評価履歴 / tl: 経過 / replay: 再生中の時刻(ms)
 const MON_KEEP = 10 * 60e3;
 const MON = { LAT0: 24, LAT1: 46, LON0: 122, LON1: 146.5, KX: Math.cos(35 * Math.PI / 180) };
 const heatColor = (n) => (n >= 20 ? '#ff4538' : n >= 10 ? '#ff9f2e' : n >= 5 ? '#ffe14d' : n >= 2 ? '#4fd1a0' : '#6db3f2');
@@ -1170,6 +1240,38 @@ function monDetect(m) {                         // 設定に関係なく記録�
   const now = Date.now(); mon.det.push({ t: now, area: m.area });
   if (mon.det.length > 6000 || now - mon.det[0].t > MON_KEEP) { const lim = now - MON_KEEP; mon.det = mon.det.filter(x => x.t >= lim).slice(-6000); }
 }
+const GRADE_COL = { A: '#ff4538', B: '#ff9f2e', C: '#ffe14d', D: '#6db3f2' };   // P2P 9611 の display（A が最も確からしい）
+const CONF_NOTIFY = 0.9;
+function monTl(kind, text, t, key) {
+  if (key && mon.tl.some(x => x.key === key)) return;
+  const now = t || Date.now(); mon.tl.push({ t: now, kind, text, key: key || '' });
+  const lim = Date.now() - MON_KEEP; mon.tl = mon.tl.filter(x => x.t >= lim).slice(-40);
+}
+function monEval(m) {                           // P2P 9611: 地震感知情報の評価結果（設定に関係なく記録）
+  const now = Date.now(), ac = m.area_confidences && typeof m.area_confidences === 'object' ? m.area_confidences : {};
+  const areas = new Map();
+  for (const k of Object.keys(ac)) {
+    const v = ac[k], code = Number(k); if (!v || !Number.isFinite(code)) continue;
+    areas.set(code, { conf: Number(v.confidence) || 0, count: Number(v.count) || 0, disp: GRADE_COL[v.display] ? v.display : 'D' });
+  }
+  const conf = Number(m.confidence) || 0, count = Number(m.count) || 0;
+  const st = parseJst(m.started_at), key = String(m.started_at || '');
+  if (key !== mon.startedKey) {                 // 新しい感知のまとまり
+    mon.startedKey = key; mon.notified = false;
+    monTl('detect', '揺れの感知を検知（P2P）', Number.isFinite(st) ? st : now, 'det:' + key);
+  }
+  mon.hist.push({ t: now, conf, count, areas });
+  const lim = now - MON_KEEP; if (mon.hist.length > 400 || mon.hist[0].t < lim) mon.hist = mon.hist.filter(x => x.t >= lim).slice(-400);
+  if (conf < 0.5) mon.notified = false;
+  if (conf >= CONF_NOTIFY && !mon.notified) {   // 信頼度が高いとき、1回だけ軽く知らせる
+    mon.notified = true; monTl('conf', `評価の信頼度が ${Math.round(conf * 100)}% に到達`, now, 'conf:' + key);
+    if (settings.shake) {
+      const msg = `P2P利用者の揺れ感知の評価が高まっています（信頼度 ${Math.round(conf * 100)}%・${count}件）。参考情報です`;
+      toast(msg); notify('揺れの感知が多数', msg, 'shake-eval', false);
+    }
+  }
+}
+const monSnap = (vt) => { for (let i = mon.hist.length - 1; i >= 0; i--) { const h = mon.hist[i]; if (h.t <= vt) return vt - h.t <= 90000 ? h : null; } return null; };
 function monFeed(m) {
   let text = null, lv = '';
   if (m.code === 551) {
@@ -1177,6 +1279,7 @@ function monFeed(m) {
     const sc = Number.isFinite(e.maxScale) && e.maxScale >= 10 ? scaleInfo(e.maxScale).plain : '不明';
     text = `地震情報 最大震度${sc} ${h.name || '震源調査中'}${h.magnitude > 0 ? ' M' + Number(h.magnitude).toFixed(1) : ''}`;
     lv = e.maxScale >= 45 ? 'bad' : e.maxScale >= 30 ? 'warn' : '';
+    monTl(m.issue && m.issue.type === 'ScalePrompt' ? 'prompt' : 'quake', m.issue && m.issue.type === 'ScalePrompt' ? `震度速報 最大震度${sc}` : `震源情報 ${h.name || '調査中'}`, 0, 'q:' + (m.id || '') + ':' + ((m.issue && m.issue.type) || ''));
   } else if (m.code === 552) {
     const off = m.cancelled || !(m.areas && m.areas.length);
     text = off ? '津波予報 解除' : `津波予報 ${m.areas.length}区域に発表`; lv = off ? '' : 'bad';
@@ -1184,6 +1287,7 @@ function monFeed(m) {
     if (m.test) return;
     const h = (m.earthquake && m.earthquake.hypocenter) || {};
     text = m.cancelled ? '緊急地震速報 取り消し' : `緊急地震速報（警報） ${h.name || ''}`.trim(); lv = m.cancelled ? '' : 'bad';
+    if (!m.cancelled) monTl('eew', `緊急地震速報${m.drill ? '（訓練）' : ''} ${h.name || ''}`.trim(), 0, 'eew:' + ((m.issue && m.issue.eventId) || m.id || ''));
   }
   if (!text) return;
   mon.feed.unshift({ t: Date.now(), text, lv }); if (mon.feed.length > 30) mon.feed.length = 30;
@@ -1195,6 +1299,11 @@ function openMonitor() {
 function monLoop() {
   if (!mon.open) return;
   const now = Date.now();
+  if (mon.playing && mon.replay != null) {       // 再生: 実時間の20倍で進め、現在に追いついたらライブに戻る
+    mon.replay += (now - (mon.lastFrame || now)) * 20;
+    if (mon.replay >= now) { mon.replay = null; mon.playing = false; }
+  }
+  mon.lastFrame = now;
   if (now - mon.lastDom > 500) { mon.lastDom = now; monDom(now); }
   monDraw(now);
   mon.raf = requestAnimationFrame(monLoop);
@@ -1207,6 +1316,7 @@ function monSize(cv, hFixed) {
   return { c, w, h };
 }
 function monDraw(now) {
+  const vt = mon.replay == null ? now : mon.replay;   // vt: 表示する時刻（再生中は過去）
   const sz = monSize($('#monCanvas')); if (!sz) return;
   const { c, w, h } = sz;
   const sx = (MON.LON1 - MON.LON0) * MON.KX, sy = MON.LAT1 - MON.LAT0, s = Math.min(w / sx, h / sy) * 0.97;
@@ -1224,14 +1334,22 @@ function monDraw(now) {
 
   // 揺れの感知（直近60秒の件数を色と大きさで表現）
   if (areaTable) {
-    const cnt = new Map(), lim = now - 60000;
-    for (let i = mon.det.length - 1; i >= 0; i--) { const d = mon.det[i]; if (d.t < lim) break; cnt.set(d.area, (cnt.get(d.area) || 0) + 1); }
+    const snap = monSnap(vt);                   // P2P 9611: 地域ごとの評価（件数と等級 A〜D で大きさ・色・発光を変える）
+    if (snap) snap.areas.forEach((v, code) => {
+      const a = areaTable.get(code); if (!a || !v.count) return; const [x, y] = P(a.lat, a.lon), col = GRADE_COL[v.disp] || GRADE_COL.D, r = 4 + Math.min(16, Math.sqrt(v.count) * 2.6);
+      c.save(); c.shadowColor = col; c.shadowBlur = v.disp === 'A' ? 22 : v.disp === 'B' ? 14 : v.disp === 'C' ? 6 : 0;
+      c.fillStyle = col; c.globalAlpha = v.disp === 'D' ? .6 : .9; c.beginPath(); c.arc(x, y, r, 0, 6.283); c.fill(); c.restore();
+      if (v.count >= 5) { c.fillStyle = '#000'; c.font = '700 10px "Orbitron","Roboto Flex",sans-serif'; c.textAlign = 'center'; c.fillText(String(v.count), x, y + .5); c.textAlign = 'left'; c.font = '600 12px "Roboto Flex","Noto Sans JP",sans-serif'; }
+    });
+    const cnt = new Map(), lim = vt - 60000;
+    for (let i = mon.det.length - 1; i >= 0; i--) { const d = mon.det[i]; if (d.t > vt) continue; if (d.t < lim) break; cnt.set(d.area, (cnt.get(d.area) || 0) + 1); }
     cnt.forEach((n, area) => {
+      if (snap && snap.areas.has(area)) return;   // 9611 で評価済みの地域は上で描画
       const a = areaTable.get(area); if (!a) return; const [x, y] = P(a.lat, a.lon);
       c.fillStyle = heatColor(n); c.globalAlpha = .88; c.beginPath(); c.arc(x, y, 3 + Math.min(11, Math.sqrt(n) * 2.2), 0, 6.283); c.fill();
     });
     c.globalAlpha = 1; c.lineWidth = 1.5;
-    for (let i = mon.det.length - 1; i >= 0; i--) {      // 新着のさざ波
+    for (let i = mon.det.length - 1; i >= 0 && mon.replay == null; i--) {      // 新着のさざ波（ライブのみ）
       const d = mon.det[i], age = now - d.t; if (age > 3000) break;
       const a = areaTable.get(d.area); if (!a) continue; const [x, y] = P(a.lat, a.lon), k = age / 3000;
       c.strokeStyle = `rgba(255,205,130,${(1 - k) * .85})`; c.beginPath(); c.arc(x, y, 5 + k * 28, 0, 6.283); c.stroke();
@@ -1251,7 +1369,7 @@ function monDraw(now) {
     label(`${q.name || '震源'} ${q.mag >= 0 ? 'M' + q.mag.toFixed(1) : ''}`.trim(), x + 13, y - 14, '#fff');
   }
   // 緊急地震速報: P波 / S波の同心円（概算）
-  if (state.eew) {
+  if (state.eew && settings.waveEst) {
     const m = state.eew.msg, hy = (m.earthquake && m.earthquake.hypocenter) || {}, lat = Number(hy.latitude), lon = Number(hy.longitude);
     if (validCoord(lat, lon)) {
       let o = parseJst(m.earthquake.originTime); if (!Number.isFinite(o)) o = parseJst(m.issue && m.issue.time); if (!Number.isFinite(o)) o = now;
@@ -1270,12 +1388,13 @@ function monDom(now) {
   const pill = (id, cls, text) => { const el = $(id); if (!el) return; el.className = 'pill pill--' + cls; if (el.textContent !== text) el.textContent = text; };
   set('#monClock', new Date(now).toLocaleTimeString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' }));
   // 感知の集計
-  const lim = now - MON_KEEP, bins = new Array(60).fill(0); let n60 = 0, n10 = 0; const byPref = new Map();
+  const vt = mon.replay == null ? now : mon.replay;   // 再生中は過去の時刻で集計
+  const lim = vt - MON_KEEP, bins = new Array(60).fill(0); let n60 = 0, n10 = 0; const byPref = new Map();
   for (const d of mon.det) {
-    if (d.t < lim) continue;
+    if (d.t < lim || d.t > vt) continue;
     bins[Math.min(59, Math.floor((d.t - lim) / 10000))]++;
-    if (now - d.t < 60000) { n60++; const a = areaTable && areaTable.get(d.area); if (a) byPref.set(a.pref, (byPref.get(a.pref) || 0) + 1); }
-    if (now - d.t < 10000) n10++;
+    if (vt - d.t < 60000) { n60++; const a = areaTable && areaTable.get(d.area); if (a) byPref.set(a.pref, (byPref.get(a.pref) || 0) + 1); }
+    if (vt - d.t < 10000) n10++;
   }
   const surge = n60 >= 10;
   set('#monN60', String(n60)); set('#monN10', String(n10));
@@ -1300,7 +1419,34 @@ function monDom(now) {
   const fd = $('#monFeed');
   const fh = mon.feed.slice(0, 12).map(f => `<li class="${f.lv}"><time>${new Date(f.t).toLocaleTimeString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' })}</time><span>${esc(f.text)}</span></li>`).join('');
   if (fd.dataset.h !== fh) { fd.dataset.h = fh; fd.innerHTML = fh || '<li class="empty">受信待ち（地震情報・津波・緊急地震速報が届くとここに流れます）</li>'; }
+  monEvalDom(vt, now);
   monSpark(bins);
+}
+function monEvalDom(vt, now) {                   // P2P 9611 の評価: ゲージ・都道府県別・経過・再生バー
+  const set = (id, v) => { const el = $(id); if (el && el.textContent !== v) el.textContent = v; };
+  const snap = monSnap(vt), bar = $('#monGaugeBar'), g = $('#monGauge');
+  const pct = snap ? Math.round(snap.conf * 100) : 0;
+  if (bar) { bar.style.width = pct + '%'; bar.className = pct >= 90 ? 'hi' : pct >= 50 ? 'mid' : ''; }
+  if (g) g.setAttribute('aria-valuenow', String(pct));
+  set('#monGaugeTxt', snap ? `${pct}%` : '—');
+  set('#monGaugeSub', snap ? `評価に使われた感知 ${snap.count}件 ／ 評価地域 ${snap.areas.size}` : '評価なし（P2P が評価結果を出すと表示されます）');
+  const pl = $('#monPrefs');
+  if (pl) {
+    const by = new Map();
+    if (snap && areaTable) snap.areas.forEach((v, code) => { const a = areaTable.get(code); if (a) by.set(a.pref, (by.get(a.pref) || 0) + v.count); });
+    const rows = [...by.entries()].filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 5), mx = rows.length ? rows[0][1] : 1;
+    const h = rows.map(([p, n]) => `<li><span>${esc(p)}</span><i style="--w:${Math.max(6, Math.round(n / mx * 100))}%"></i><b>${n}</b></li>`).join('');
+    if (pl.dataset.h !== h) { pl.dataset.h = h; pl.innerHTML = h || '<li class="empty">報告の多い都道府県はありません</li>'; }
+  }
+  const tl = $('#monTl');
+  if (tl) {
+    const h = mon.tl.filter(x => x.t <= vt).slice(-8).reverse().map(x => `<li class="${x.kind}"><time>${new Date(x.t).toLocaleTimeString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' })}</time><span>${esc(x.text)}</span></li>`).join('');
+    if (tl.dataset.h !== h) { tl.dataset.h = h; tl.innerHTML = h || '<li class="empty">経過はまだありません（感知 → 緊急地震速報 → 震度速報 → 震源情報の順に並びます）</li>'; }
+  }
+  const sl = $('#monReplay'), lb = $('#monReplayTxt'), pb = $('#monPlay');
+  if (sl && document.activeElement !== sl) sl.value = String(mon.replay == null ? 0 : -Math.round((now - mon.replay) / 1000));
+  if (lb) { const s = mon.replay == null ? 0 : Math.round((now - mon.replay) / 1000), t = s ? `${s >= 60 ? Math.floor(s / 60) + '分' : ''}${s % 60 ? s % 60 + '秒' : ''}前` : 'ライブ'; if (lb.textContent !== t) lb.textContent = t; lb.classList.toggle('past', s > 0); }
+  if (pb) { const t = mon.playing ? '⏸ 停止' : '▶ 再生'; if (pb.textContent !== t) pb.textContent = t; }
 }
 function monSpark(bins) {
   const sz = monSize($('#monSpark'), 88); if (!sz) return;
@@ -1342,7 +1488,7 @@ async function runDiag() {
   } else add('warn', '中継サーバー', 'config.js の relayUrl が未設定です');
   const t1 = performance.now();
   try { const r = await withTimeout(fetch(`${CFG.apiBase}/history?codes=551&limit=1`, { cache: 'no-store' }), 10000, 'timeout'); add(r.ok ? 'ok' : 'bad', 'P2P地震情報 API', `HTTP ${r.status} ・ ${Math.round(performance.now() - t1)}ms`); } catch { add('bad', 'P2P地震情報 API', '到達できません'); }
-  add(state.status === 'live' ? 'ok' : 'warn', 'WebSocket', state.status === 'live' ? `ライブ ／ 最終受信 ${mon.lastMsg ? rel(mon.lastMsg) : '（起動後まだ受信なし）'}` : '未接続（再接続を試行中）');
+  add(state.status === 'live' ? 'ok' : 'warn', 'WebSocket', state.status === 'live' ? `ライブ ／ 最終受信 ${mon.lastMsg ? rel(mon.lastMsg) : '（起動後まだ受信なし）'}` : `未接続（再接続を試行中${retry >= 5 ? '。P2P は同じWi-Fi（同一IPアドレス）で3台以上は接続できません。他の端末のアプリを閉じてください' : ''}）`);
   try { const t = await withTimeout(G.loadAreas(), 12000, 'timeout'); add(t.size ? 'ok' : 'warn', '地域データ（感知）', t.size ? `${t.size}地域` : '取得できません（感知の地点表示は無効。通知・履歴には影響しません）'); } catch { add('warn', '地域データ（感知）', '取得できません'); }
   const top = state.events.slice().sort((a, b) => b.t - a.t)[0];
   add(top ? 'ok' : 'warn', '履歴データ', top ? `${state.events.length}件 ／ 最新 ${rel(top.t)}` : '未取得');
@@ -1676,6 +1822,7 @@ function renderHomePanel() {
   }).join('')}</ul>` : `<p class="hsub">${eewLog.loading ? '読み込み中…' : eewLog.at ? '直近の緊急地震速報（警報）はありません' : '読み込めていません（下に引っ張って更新）'}</p>`}</section>`;
 
   html += `<div class="hquick"><button type="button" class="btn btn--sm hq-shaken" data-act="shaken">揺れた！ 行動ガイド</button><button type="button" class="btn btn--tonal btn--sm" data-act="monitor">リアルタイム監視</button><button type="button" class="btn btn--tonal btn--sm" data-act="drill">防災訓練</button><button type="button" class="btn btn--text btn--sm" data-act="settings">設定</button></div>`;
+  html += `<div class="kmlinks"><small>公式の強震モニタ（外部サイト）</small><div><a href="http://www.kmoni.bosai.go.jp/" target="_blank" rel="noopener noreferrer">防災科研 強震モニタ</a><a href="https://typhoon.yahoo.co.jp/weather/jp/earthquake/kyoshin/" target="_blank" rel="noopener noreferrer">Yahoo!天気・災害 強震モニタ</a></div></div>`;
   el.innerHTML = html;
 }
 
@@ -1932,7 +2079,10 @@ function init() {
   const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
   on('#btnMon', 'click', openMonitor);
   on('#monClose', 'click', () => $('#monitor').close());
-  on('#monitor', 'close', () => { mon.open = false; cancelAnimationFrame(mon.raf); });
+  on('#monReplay', 'input', (e) => { const v = +e.target.value; mon.playing = false; mon.replay = v >= 0 ? null : Date.now() + v * 1000; mon.lastDom = 0; });
+  on('#monPlay', 'click', () => { if (mon.playing) { mon.playing = false; return; } if (mon.replay == null) mon.replay = Date.now() - MON_KEEP + 1000; mon.playing = true; mon.lastFrame = Date.now(); });
+  on('#monLive', 'click', () => { mon.replay = null; mon.playing = false; mon.lastDom = 0; });
+  on('#monitor', 'close', () => { mon.open = false; mon.replay = null; mon.playing = false; cancelAnimationFrame(mon.raf); });
   on('#btnDiag', 'click', runDiag);
   on('#btnDrill', 'click', startDrill);
   on('#btnCsv', 'click', exportCsv);
@@ -2006,7 +2156,7 @@ function init() {
   }
 }
 /* ---------------- 起動ガード: ファイルの版ずれ / 初期化エラーを画面に出す ---------------- */
-const APP_VER = '2.7.0';
+const APP_VER = '2.8.1';
 async function fileProblems() {                      // 読み込めなかった js ファイルの原因（404 など）を調べる
   const out = [];
   for (const [f, ok] of [['js/geo.js', GEO_OK], ['js/stats.js', !!(window.Stats && window.Stats.render)]]) {
