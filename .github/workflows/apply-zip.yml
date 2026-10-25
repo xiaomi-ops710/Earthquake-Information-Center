@@ -1,0 +1,26 @@
+name: Apply uploaded zip
+on:
+  push:
+    paths: ['*.zip']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip and commit
+        run: |
+          shopt -s nullglob
+          zips=(*.zip)
+          [ ${#zips[@]} -eq 0 ] && exit 0
+          for z in "${zips[@]}"; do
+            unzip -o "$z" -x '__MACOSX/*' '.git/*' 'config.js'
+            rm -f "$z"
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Apply uploaded zip: ${zips[*]}"
+          git push
