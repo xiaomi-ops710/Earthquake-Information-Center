@@ -1,5 +1,5 @@
 /**
- * P2P地震情報 WebSocket → FCM 中継サーバー (v4)
+ * P2P地震情報 WebSocket → FCM 中継サーバー (v5)
  *  - wss://api.p2pquake.net/v2/ws を常時購読し、受信した瞬間に FCM トピックへ送信
  *  - POST /subscribe   { token, nation, region:{pref,name,min}, prev }  購読の登録・差し替え
  *  - POST /unsubscribe { token, prev }
@@ -9,6 +9,8 @@
  * トピック設計（端末ごとに最大4つ）
  *   quake-alert            全端末 … 津波・緊急地震速報（地域別だけの端末にも必ず届く）
  *   quake-volcano          噴火速報・噴火警報（設定でオンにした端末）
+ *   quake-volcano-obs      噴火に関する火山観測報（噴火の発生）・降灰予報（速報/詳細）（設定でオンにした端末）
+ *   見守り地点は quake-pref-{1..47}-{t} を最大4地点ぶん追加で購読（サーバー側の配信ロジックは地域別通知と同じ）
  *   quake-min-{10..55}     全国の最小震度
  *   quake-pref-{1..47}-{t} 都道府県別の最小震度
  *
@@ -32,6 +34,7 @@ import admin from 'firebase-admin';
 const THRESHOLDS = [10, 30, 40, 45, 55];            // 端末が選べる最小震度（P2P震度値）
 const TOPIC_ALERT = 'quake-alert';                  // 全端末: 津波・緊急地震速報
 const TOPIC_VOLCANO = 'quake-volcano';              // 噴火速報・噴火警報（任意）
+const TOPIC_VOLCANO_OBS = 'quake-volcano-obs';      // 噴火の観測報・降灰予報（任意）
 const PREFS = ['北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'];
 
 const topicNation = (t) => `quake-min-${t}`;
@@ -41,11 +44,22 @@ const topicRegion = (idx, t) => `quake-pref-${idx}-${t}`;   // idx: 1..47
 const validMin = (v, d) => (THRESHOLDS.includes(v) ? v : d);
 /** クライアントの { nation, region:{name,pref,min} } を検証して正規化（旧形式 {minScale} も受け付ける） */
 function normalizeSub(b) {
-  const out = { nation: null, region: null, volcano: false };
+  const out = { nation: null, region: null, volcano: false, volcanoObs: false, watch: [] };
   if (!b || typeof b !== 'object') return out;
   if ('nation' in b) out.nation = THRESHOLDS.includes(b.nation) ? b.nation : null;
   else if ('minScale' in b) out.nation = validMin(b.minScale, 30);
-  out.volcano = b.volcano === true;
+  out.volcano = b.volcano === true; out.volcanoObs = b.volcanoObs === true;
+  if (Array.isArray(b.watch)) {                  // 見守り地点: 最大4つの都道府県（同じ県は1つにまとめる）
+    const seen = new Set();
+    for (const w of b.watch) {
+      if (!w || typeof w !== 'object') continue;
+      let idx = PREFS.indexOf(w.name) + 1;
+      if (!idx && Number.isInteger(w.pref) && w.pref >= 1 && w.pref <= 47) idx = w.pref;
+      if (!idx || seen.has(idx)) continue;
+      seen.add(idx); out.watch.push({ idx, min: validMin(w.min, 40) });
+      if (out.watch.length >= 4) break;
+    }
+  }
   const r = b.region;
   if (r && typeof r === 'object') {
     let idx = PREFS.indexOf(r.name) + 1;
@@ -60,7 +74,9 @@ function topicsOf(sub, { alert = true } = {}) {
   if (sub.nation != null) s.push(topicNation(sub.nation));
   if (sub.region) s.push(topicRegion(sub.region.idx, sub.region.min));
   if (sub.volcano) s.push(TOPIC_VOLCANO);
-  return s;
+  if (sub.volcanoObs) s.push(TOPIC_VOLCANO_OBS);
+  for (const w of sub.watch || []) s.push(topicRegion(w.idx, w.min));
+  return [...new Set(s)];
 }
 
 /* ---------- 表示整形 ---------- */
@@ -220,7 +236,7 @@ class AlertTracker {
 }
 
 /* ===== volcano.js ===== */
-const VOLCANO_FEED = 'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml';
+const VOLCANO_FEED = process.env.VOLCANO_FEED || 'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml';
 
 const decode = (s) => String(s)
   .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
@@ -264,11 +280,14 @@ const volcanoName = (e) => {
   return m[1].replace(/[\s　]*(噴火速報|噴火警報|噴火予報|降灰予報|火山の状況に関する解説情報|噴火に関する火山観測報|火山.*解説.*).*$/, '').trim() || m[1];   // 「【浅間山 噴火警報】」→「浅間山」
 };
 const pushWorthy = (c) => c.kind === 'flash' || c.kind === 'warning';
+/* 噴火の発生を知らせる観測報と、降灰予報（速報・詳細）。定時の降灰予報は毎日出るので通知しない。噴火が無かった旨の観測報も除く */
+const OBS_NEG = /(噴火|爆発).{0,8}(していません|ありません|なし|なかった|認められません|確認されません|観測されませんでした)/;
+const obsWorthy = (x) => (x.kind === 'obs' && !OBS_NEG.test(x.summary || '')) || (x.kind === 'ash' && /速報|詳細/.test(x.label || x.title || ''));
 
 class VolcanoTracker {
   constructor() { this.seen = new Set(); this.primed = false; this.items = []; }
   /** フィードの entry 配列を取り込み、{ items: 表示用の一覧, pushes: 通知すべきもの } を返す */
-  ingest(entries, now = Date.now(), topic = 'quake-volcano') {
+  ingest(entries, now = Date.now(), topic = 'quake-volcano', obsTopic = 'quake-volcano-obs') {
     const items = entries.filter(isVolcano).map(e => {
       const c = classify(e);
       return { id: e.id, title: e.title, kind: c.kind, label: c.label, level: c.level, name: volcanoName(e), summary: e.content, updated: e.updated, author: e.author, link: e.link };
@@ -282,7 +301,13 @@ class VolcanoTracker {
       body: (x.summary || x.title).replace(/\s+/g, ' ').slice(0, 140),
       urgent: true, renotify: true, ttl: 1800
     }));
-    return { items, pushes };
+    const obsPushes = cand.filter(x => !pushWorthy(x) && obsWorthy(x)).map(x => ({
+      topic: obsTopic, tag: 'volcano-obs-' + (x.name || x.kind), kind: 'volcano', mid: x.id,
+      title: (x.kind === 'obs' ? `噴火発生（観測報）${x.name ? '：' + x.name : ''}` : `${x.label}${x.name ? '：' + x.name : ''}`).slice(0, 80),
+      body: (x.summary || x.title).replace(/\s+/g, ' ').slice(0, 140),
+      urgent: false, renotify: true, ttl: 1800
+    }));
+    return { items, pushes: pushes.concat(obsPushes) };
   }
 }
 
@@ -292,7 +317,7 @@ class VolcanoTracker {
 
 
 
-const SERVER_VERSION = 4;
+const SERVER_VERSION = 5;
 
 const WS_URL = process.env.P2P_WS_URL || 'wss://api.p2pquake.net/v2/ws';
 const API_BASE = process.env.P2P_API || 'https://api.p2pquake.net/v2';

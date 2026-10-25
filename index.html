@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>地震・津波速報</title>
 <meta name="theme-color" content="#050506">
-<meta name="app-version" content="2.8.1">
+<meta name="app-version" content="2.9.0">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -239,6 +239,10 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
               <div class="sx-row__text"><b>噴火速報・噴火警報</b><small>気象庁が発表したときにプッシュ通知（地震のしきい値とは別）</small></div>
               <label class="switch"><input type="checkbox" id="optVolcano" aria-label="噴火速報・噴火警報の通知"><span></span></label>
             </div>
+            <div class="sx-row" data-toggle>
+              <div class="sx-row__text"><b>噴火の発生・降灰予報（速報）</b><small>噴火に関する火山観測報（噴火が発生したとき）と、降灰予報（速報・詳細）もお知らせ。桜島など噴火の多い火山では回数が増えます。上の噴火通知がオンのときだけ使えます</small></div>
+              <label class="switch"><input type="checkbox" id="optVolcanoObs" aria-label="噴火の観測報・降灰予報の通知"><span></span></label>
+            </div>
             <div class="sx-row">
               <div class="sx-row__text"><b>津波・緊急地震速報</b><small>安全のため常に受信します（オフにはできません）</small></div>
               <span class="pill pill--ok">常に受信</span>
@@ -281,7 +285,21 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
                 <select id="placePref" class="field" aria-label="都道府県"></select>
                 <button type="button" class="btn btn--tonal btn--sm" id="btnPlaceAdd">追加</button>
               </div>
-              <p class="hint">最大4件。ホーム画面に、各地点（都道府県）の直近24時間の揺れと、緊急地震速報の予想震度を表示します。プッシュ通知は「あなたの場所」と「地域別通知」の設定が対象です。</p>
+              <p class="hint">最大4件。ホーム画面に、各地点（都道府県）の直近24時間の揺れと、緊急地震速報の予想震度を表示します。プッシュ通知は、下のスイッチで見守り地点にも送れます（「あなたの場所」と「地域別通知」とは別設定です）。</p>
+              <div class="sx-row" data-toggle>
+                <div class="sx-row__text"><b>見守り地点の地震をプッシュ通知</b><small>追加した都道府県（最大4件）で、選んだ震度以上の揺れがあったときにお知らせ</small></div>
+                <label class="switch"><input type="checkbox" id="optPlacesPush" aria-label="見守り地点のプッシュ通知"><span></span></label>
+              </div>
+              <div class="sx-sub" id="placesPushBox">
+                <span class="sx-sub__l">見守り地点の最小震度</span>
+                <div class="chips" id="placesMin" role="radiogroup" aria-label="見守り地点の最小震度">
+                  <button type="button" class="chip" role="radio" data-v="10">震度1</button>
+                  <button type="button" class="chip" role="radio" data-v="30">3</button>
+                  <button type="button" class="chip" role="radio" data-v="40">4</button>
+                  <button type="button" class="chip" role="radio" data-v="45">5弱</button>
+                  <button type="button" class="chip" role="radio" data-v="55">6弱</button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -420,6 +438,7 @@ document.documentElement.style.setProperty('--h',_t.hue==null?48:_t.hue);}catch(
       <div class="card mon__card"><h3>感知の評価<span class="en">P2P CONFIDENCE</span></h3>
         <div id="monGauge" class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="感知の信頼度"><i id="monGaugeBar"></i><b id="monGaugeTxt">—</b></div>
         <small id="monGaugeSub" class="gauge__sub">評価なし</small>
+        <small id="monHome" class="gauge__sub mon__home"></small>
         <h4 class="mon__h4">報告の多い都道府県</h4><ul id="monPrefs" class="mon__prefs"></ul></div>
       <div class="card mon__card"><h3>経過<span class="en">TIMELINE</span></h3><ul id="monTl" class="mon__tl"></ul></div>
       <div class="card mon__card"><h3>感知数の推移<span class="en">LAST 10 MIN</span></h3><canvas id="monSpark" class="mon__spark"></canvas></div>
